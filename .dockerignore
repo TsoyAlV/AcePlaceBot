@@ -1,0 +1,10 @@
+# Only application sources and pinned dependencies enter the build context.
+*
+!Dockerfile
+!requirements.lock
+!app/
+!app/**
+!migrations/
+!migrations/*.sql
+**/__pycache__/
+**/*.pyc

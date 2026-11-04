@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+env.yaml
+config.yaml
+client_secret*.json
+credentials*.json
+token*.json
+secrets/
+.venv/
+__pycache__/
+*.pyc
