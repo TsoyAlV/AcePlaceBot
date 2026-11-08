@@ -58,6 +58,7 @@ async def callback(update,context):
             context.user_data.pop('admin_draft',None)
             context.user_data.pop('client_draft',None)
             context.user_data.pop('staff_draft',None)
+            context.user_data.pop('client_cancel',None)
             context.user_data['receipt_upload']=row['booking_id']
             await ui.screen(update,context,admin_ui.tr(lang,
                 f"Отправь один скриншот для брони #{row['booking_id']} как фото или PNG/JPEG/WebP-файл до 10 МБ. /cancel — прервать. Загрузка не подтверждает оплату.",

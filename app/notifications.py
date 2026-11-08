@@ -146,19 +146,23 @@ async def deliver_pending(bot,settings,limit=20):
         try:
             state=row['admin_notifications'][uid]
             event=state.get('event','created')
+            client=state.get('audience','admin')=='client'
+            client_cancel=state.get('origin')=='client'
+            cancelled_booking=bool((row.get('cancellation') or {}).get('cancelled_at'))
+            cancel_ru='Бронь отменена' if client or not client_cancel else ('Клиент отменил бронь' if cancelled_booking else 'Клиент отозвал заявку')
+            cancel_ko='예약이 취소되었습니다' if client or not client_cancel else ('고객이 예약을 취소했습니다' if cancelled_booking else '고객이 신청을 철회했습니다')
             titles={
                 'created':tr(lang,'Новая заявка','새 예약 신청'),
                 'confirm':tr(lang,'Бронь подтверждена','예약이 확정되었습니다'),
-                'cancel':tr(lang,'Клиент отозвал заявку' if state.get('origin')=='client' else 'Бронь отменена',
-                    '고객이 신청을 철회했습니다' if state.get('origin')=='client' else '예약이 취소되었습니다'),
+                'cancel':tr(lang,cancel_ru,cancel_ko),
                 'move':tr(lang,'Время брони изменено','예약 시간이 변경되었습니다'),
                 'submit':tr(lang,'Заявка отправлена на подтверждение','예약 승인 요청'),
                 'expired':tr(lang,'Срок заявки истёк','예약 신청이 만료되었습니다'),
                 'deposit_received':tr(lang,'Предоплата получена. Подтверждение брони — отдельно.','선입금이 확인되었습니다. 예약 승인은 별도입니다.'),
                 'receipt_rejected':tr(lang,'Нужен другой скриншот оплаты','다른 결제 증빙 이미지가 필요합니다'),
                 'cleaning_reminder':tr(lang,'Напоминание: скоро уборка','알림: 청소 예정'),
+                'refund_completed':tr(lang,'Бронь отменена. Возврат выполнен','예약 취소 및 환불 완료'),
             }
-            client=state.get('audience','admin')=='client'
             text=titles.get(event,tr(lang,'Бронь изменена','예약 변경'))+'\n'
             if event=='move' and state.get('previous_start'):
                 from app.admin_ui import fmt

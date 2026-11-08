@@ -56,7 +56,7 @@ async def callback(update,context):
     await query.answer()
     try:
         lang=await call(update,context,lambda c,a,l:l)
-        for key in ('admin_draft','client_draft','receipt_upload'):
+        for key in ('admin_draft','client_draft','receipt_upload','client_cancel'):
             context.user_data.pop(key,None)
         parts=query.data.split(':')
         command=parts[1]
@@ -106,6 +106,8 @@ async def callback(update,context):
                 expected=data['expected'],field=data['field'],value=data['value']))
             context.user_data.pop('staff_draft',None)
             await ui.result(update,context,tr(lang,'Сохранено.','저장되었습니다.')+'\n'+card(row,lang),reply_markup=controls(row,lang))
+            from app.command_menu import refresh_user
+            await refresh_user(context,row['telegram_user_id'])
     except (BookingError,ValueError,IndexError) as error:
         if isinstance(error,AccessDenied):
             context.user_data.pop('staff_draft',None)

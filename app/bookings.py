@@ -19,6 +19,7 @@ from app.business_config import load_business_config
 from app.rental_rules import next_cleaning, rental_price, RulesError
 from app.booking_events import enqueue_event
 from app.calendar_queue import queue_calendar
+from app.cancellation_rules import current_policy,calculate as cancellation_calculation
 
 
 def quote_rental(start: datetime, end: datetime) -> dict:
@@ -62,6 +63,10 @@ class SlotUnavailable(BookingError):
 
 
 class StaleBooking(BookingError):
+    pass
+
+
+class CancellationTermsChanged(StaleBooking):
     pass
 
 
@@ -142,9 +147,9 @@ def get_booking(connection: Connection, actor: int, booking_id: int) -> dict:
     return row
 
 
-def list_bookings(connection: Connection, actor: int, *, limit: int | None = None, offset: int = 0, pending_only: bool = False, blocks_only: bool = False) -> list[dict]:
+def list_bookings(connection: Connection, actor: int, *, limit: int | None = None, offset: int = 0, pending_only: bool = False, blocks_only: bool = False, refunds_only: bool = False) -> list[dict]:
     params = ()
-    condition = " WHERE status <> 'cancelled'"
+    condition = " WHERE status='cancelled' AND cancellation->>'refund_status'='pending'" if refunds_only else " WHERE status <> 'cancelled'"
     if admin_role(connection, actor) not in ('owner', 'admin'):
         condition += ' AND user_id=%s'
         params = (_user(connection, actor),)
@@ -187,7 +192,7 @@ def create_booking(connection: Connection, actor: int, **kwargs) -> dict:
 
 def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
                    starts_at: datetime, ends_at: datetime, amount=None, request_key: UUID,
-                   unit='KRW', kind='booking', status='pending', ttl_minutes=None) -> dict:
+                   unit='KRW', kind='booking', status='pending', ttl_minutes=None,cancellation_policy=None) -> dict:
     # Manual pricing is trusted only from administrators until server tariffs exist.
     start, end = _interval(starts_at, ends_at)
     rules = load_business_config().booking
@@ -234,16 +239,17 @@ def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
     try:
         with connection.transaction():
             booking_id = connection.execute("""INSERT INTO bookings
-                (user_id,type,status,starts_at,ends_at,expires_at,amount,unit,request_key,request_data,cleaning_starts_at,cleaning_ends_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING booking_id""",
-                (user_id,kind,status,start,end,expires,amount,unit,request_key,Jsonb(data),cleaning_start,cleaning_end)).fetchone()[0]
+                (user_id,type,status,starts_at,ends_at,expires_at,amount,unit,request_key,request_data,cleaning_starts_at,cleaning_ends_at,cancellation)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING booking_id""",
+                (user_id,kind,status,start,end,expires,amount,unit,request_key,Jsonb(data),cleaning_start,cleaning_end,
+                 Jsonb(dict(policy=cancellation_policy or current_policy(load_business_config())) if kind=='booking' else {}))).fetchone()[0]
     except ExclusionViolation:
         raise SlotUnavailable('Requested interval is occupied') from None
     return _get(connection, booking_id)
 
 
 def create_client_booking(connection: Connection, actor: int, *, starts_at: datetime,
-                          ends_at: datetime, request_key: UUID, expected_quote: dict) -> dict:
+                          ends_at: datetime, request_key: UUID, expected_quote: dict, expected_policy: dict | None=None) -> dict:
     """Client may only book for themselves using a server quote; never accepts price/status."""
     user_id=_user(connection,actor)
     _lock(connection)
@@ -257,17 +263,34 @@ def create_client_booking(connection: Connection, actor: int, *, starts_at: date
         return row
     if quote_rental(starts_at,ends_at)!=expected_quote:
         raise BookingError('Quote changed; request a new quote')
+    if expected_policy is not None and current_policy(load_business_config())!=expected_policy:
+        raise BookingError('Quote changed; request a new quote')
     _expire(connection)
     if connection.execute("SELECT 1 FROM bookings WHERE user_id=%s AND status IN ('hold','pending') LIMIT 1",(user_id,)).fetchone():
         raise BookingError('You already have a pending request')
     row=_create_booking(connection,actor,user_id=user_id,starts_at=starts_at,ends_at=ends_at,
-        request_key=request_key,amount=None,status='pending')
+        request_key=request_key,amount=None,status='pending',cancellation_policy=expected_policy)
     enqueue_event(connection,row,'created',actor=actor,origin='client')
     return _get(connection,row['booking_id'])
 
 
+def quote_cancellation(connection,actor,booking_id,*,expected_version=None):
+    row=_get(connection,booking_id)
+    if row['user_id']!=_user(connection,actor) or row['type']!='booking':
+        raise AccessDenied('Booking access denied')
+    if expected_version is not None and row['version']!=expected_version:
+        raise StaleBooking('Booking changed')
+    now=_now(connection)
+    if row['status'] not in ('hold','pending','confirmed') or row['starts_at']<=now:
+        raise BookingError('Отмена после начала аренды — через администратора. / 시작 후 취소는 관리자에게 문의하세요.')
+    if row['status'] in ('hold','pending') and row['expires_at']<=now:
+        raise BookingError('Request expired; confirmation or transfer is not permitted')
+    return cancellation_calculation(row,now)
+
+
 def change_booking(connection: Connection, actor: int, booking_id: int, *, action: str,
-                   expected_version: int, starts_at=None, ends_at=None, ttl_minutes=None,origin: str | None=None) -> dict:
+                   expected_version: int, starts_at=None, ends_at=None, ttl_minutes=None,origin: str | None=None,
+                   expected_cancellation: dict | None=None) -> dict:
     if action not in ('submit','confirm','cancel','move'):
         raise BookingError('Unsupported action')
     _lock(connection)
@@ -278,9 +301,10 @@ def change_booking(connection: Connection, actor: int, booking_id: int, *, actio
     if not privileged or origin=='client':
         if row['user_id'] != _user(connection, actor) or action != 'cancel':
             raise AccessDenied('Action not permitted')
-        # Until cancellation rules are configured, self-service only withdraws unconfirmed requests.
-        if row['status'] not in ('hold', 'pending', 'cancelled'):
-            raise AccessDenied('Confirmed cancellations require an administrator')
+        if row['status'] not in ('hold', 'pending', 'confirmed', 'cancelled'):
+            raise AccessDenied('Action not permitted')
+        if (row['status']=='confirmed' or row['deposit_paid_amount']+row['balance_paid_amount']>0) and expected_cancellation is None:
+            raise AccessDenied('Cancellation confirmation is required')
     if row['version'] != expected_version:
         raise StaleBooking('Booking changed; reload its current version')
     now = _now(connection)
@@ -292,7 +316,20 @@ def change_booking(connection: Connection, actor: int, booking_id: int, *, actio
             return row
         if row['status'] not in ('hold','pending','confirmed'):
             raise BookingError('Booking cannot be cancelled')
-        connection.execute("UPDATE bookings SET status='cancelled',expires_at=NULL WHERE booking_id=%s", (booking_id,))
+        if not privileged or origin=='client':
+            if row['starts_at']<=now:
+                raise BookingError('Отмена после начала аренды — через администратора. / 시작 후 취소는 관리자에게 문의하세요.')
+            if expected_cancellation is not None:
+                quote=cancellation_calculation(row,now)
+                if quote!=expected_cancellation:
+                    raise CancellationTermsChanged('Cancellation terms changed; confirm again')
+                data=dict(policy=quote['policy'],cancelled_at=now.isoformat(),cancelled_by=_user(connection,actor),quote=quote,
+                    refund_status='pending' if Decimal(quote['refund_amount'])>0 else 'not_due')
+                connection.execute("UPDATE bookings SET status='cancelled',expires_at=NULL,cancellation=%s WHERE booking_id=%s",(Jsonb(data),booking_id))
+            else:
+                connection.execute("UPDATE bookings SET status='cancelled',expires_at=NULL WHERE booking_id=%s", (booking_id,))
+        else:
+            connection.execute("UPDATE bookings SET status='cancelled',expires_at=NULL WHERE booking_id=%s", (booking_id,))
     elif action == 'confirm':
         if row['status'] == 'confirmed':
             return row
@@ -327,3 +364,21 @@ def change_booking(connection: Connection, actor: int, booking_id: int, *, actio
     enqueue_event(connection,updated,action,actor=actor,
                   origin='client' if origin=='client' or not privileged else 'admin',previous=row)
     return _get(connection, booking_id)
+
+
+def complete_refund(connection,actor,booking_id,*,expected_version):
+    _admin(connection,actor)
+    _lock(connection)
+    row=_get(connection,booking_id,lock=True)
+    if row['version']!=expected_version:
+        raise StaleBooking('Booking changed')
+    data=dict(row.get('cancellation') or {})
+    if row['status']!='cancelled' or data.get('refund_status') not in ('pending','completed'):
+        raise BookingError('Нет ожидающего возврата. / 대기 중인 환불이 없습니다.')
+    if data['refund_status']=='completed':
+        return row
+    data.update(refund_status='completed',refunded_at=_now(connection).isoformat(),refunded_by=_user(connection,actor))
+    connection.execute('UPDATE bookings SET cancellation=%s WHERE booking_id=%s',(Jsonb(data),booking_id))
+    updated=_get(connection,booking_id)
+    enqueue_event(connection,updated,'refund_completed',actor=actor,origin='admin')
+    return _get(connection,booking_id)

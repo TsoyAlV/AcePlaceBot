@@ -112,6 +112,10 @@ class VisitConfig(Model):
     ko: VisitText = Field(default_factory=VisitText)
 
 
+class CancellationRules(Model):
+    refund_cutoff_hours: int = Field(default=72,ge=1,le=8760,strict=True)
+
+
 class BusinessConfig(Model):
     timezone: Literal['Asia/Seoul']
     currency: Literal['KRW']
@@ -122,6 +126,7 @@ class BusinessConfig(Model):
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     visit: VisitConfig = Field(default_factory=VisitConfig)
+    cancellation: CancellationRules = Field(default_factory=CancellationRules)
 
 
 def load_business_config(path: Path | None = None) -> BusinessConfig:

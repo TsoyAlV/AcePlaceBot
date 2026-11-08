@@ -16,7 +16,7 @@ def enqueue_event(connection,row,event,*,actor=None,origin='admin',previous=None
         AND role IN ('owner','admin')""").fetchall():
         if tg!=actor:
             recipients.append(('admin',uid))
-    if origin!='client' and row['user_id'] is not None:
+    if row['user_id'] is not None and (origin!='client' or (event=='cancel' and (row.get('cancellation') or {}).get('cancelled_at'))):
         recipients.append(('client',row['user_id']))
     for audience,uid in recipients:
         key=f"{row['version']}:{audience}:{uid}"
