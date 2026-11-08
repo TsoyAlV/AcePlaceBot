@@ -17,6 +17,7 @@ from app.users import admin_role, register_client
 from app.business_config import load_business_config
 from app.rental_rules import next_cleaning, RulesError
 from app.date_picker import month_keyboard,parse_month
+from app import booking_details
 
 SEOUL = ZoneInfo('Asia/Seoul')
 
@@ -61,6 +62,9 @@ def card(row, lang):
     text += f"\n{status}\n{fmt(row['starts_at'])} → {fmt(row['ends_at'])}\nAsia/Seoul"
     text += f"\n{row['amount']} {row['unit']}"
     text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ')+f"{row['deposit_paid_amount']} {row['unit']}"
+    answers=booking_details.text(row,lang)
+    if answers:
+        text+='\n'+answers
     if row.get('cleaning_ends_at'):
         text+='\n'+tr(lang,'Уборка: ','청소: ')+fmt(row['cleaning_starts_at'])+' → '+fmt(row['cleaning_ends_at'])
     text += '\n' + tr(lang,'Клиент ID: ','고객 ID: ') + str(row['user_id'] or '—')
@@ -71,6 +75,8 @@ def card(row, lang):
         text+='\nGoogle Calendar: '+sync.get('status','pending')
         if sync.get('last_error'):
             text+=' · '+sync['last_error']
+    if (row.get('request_data') or {}).get('source')=='books_plans':
+        text+='\n'+tr(lang,'Источник: books_plans; изменения через config.yaml','출처: books_plans; config.yaml에서 변경')
     details=cancellation_text(row,lang)
     if details:
         text+='\n\n'+details
@@ -80,6 +86,8 @@ def card(row, lang):
 def controls(row, lang):
     bid, version = row['booking_id'], row['version']
     buttons = []
+    if (row.get('request_data') or {}).get('source')=='books_plans':
+        return Markup([[Button(tr(lang,'К списку блокировок','차단 목록'),callback_data='adm:list:blocks:0')]])
     from app.payment_ui import admin_controls
     buttons.extend(admin_controls(row,lang))
     if row['status']=='cancelled' and (row.get('cancellation') or {}).get('refund_status')=='pending':

@@ -8,11 +8,13 @@ from uuid import uuid4
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from telegram.error import Forbidden,BadRequest
+from telegram import LinkPreviewOptions
 
 from app.database import connect_database
 from app.business_config import load_business_config
 from app.admin_ui import card,controls,tr
 from app import client_ui
+from app import reviews
 
 logger=logging.getLogger(__name__)
 
@@ -65,7 +67,8 @@ def prepare_cleaning_reminders(settings):
 
 
 def claim(settings):
-    cleaning_rules=load_business_config().notifications.cleaning
+    config=load_business_config()
+    cleaning_rules=config.notifications.cleaning
     with connect_database(settings) as c:
         now=c.execute('SELECT clock_timestamp()').fetchone()[0]
         with c.cursor(row_factory=dict_row) as cursor:
@@ -83,12 +86,19 @@ def claim(settings):
                     continue
                 # Legacy entries are initial application notifications.
                 receipt_event=state.get('event')=='receipt'
-                if state.get('event')=='cleaning_reminder':
+                if state.get('event')=='review':
+                    stale=reviews.stale(row,state,now,config.reviews)
+                    if not stale and row['ends_at']>now:
+                        continue
+                elif state.get('event')=='cleaning_reminder':
                     start=row.get('cleaning_starts_at')
                     stale=(not cleaning_rules.telegram_enabled or row['status']!='confirmed' or row['type']!='booking'
                         or start is None or start.isoformat()!=state.get('cleaning_start') or start<=now)
                     if not stale and start-timedelta(hours=cleaning_rules.hours_before)>now:
                         continue
+                elif state.get('event')=='plan_conflict':
+                    plan=row.get('request_data') or {}
+                    stale=not plan.get('active') or not plan.get('conflicts') or plan.get('conflicts')!=state.get('conflicts')
                 elif receipt_event:
                     receipt=row.get('payment_receipt') or {}
                     stale=(receipt.get('review_status')!='pending' or receipt.get('file_unique_id')!=state.get('receipt_unique_id'))
@@ -137,6 +147,7 @@ def finish(settings,bid,uid,token,success,permanent=False):
 
 async def deliver_pending(bot,settings,limit=20):
     await asyncio.to_thread(prepare_cleaning_reminders,settings)
+    await asyncio.to_thread(reviews.prepare,settings,load_business_config().reviews,connect=connect_database)
     for _ in range(limit):
         job=await asyncio.to_thread(claim,settings)
         if job is None:
@@ -146,6 +157,23 @@ async def deliver_pending(bot,settings,limit=20):
         try:
             state=row['admin_notifications'][uid]
             event=state.get('event','created')
+            if event=='review':
+                rules=load_business_config().reviews
+                if not await asyncio.to_thread(reviews.is_current,settings,row['booking_id'],token,rules,connect=connect_database):
+                    await asyncio.to_thread(finish,settings,row['booking_id'],uid,token,False,True)
+                    continue
+                await bot.send_message(chat_id=chat,text=reviews.render(rules,lang),parse_mode='HTML',
+                    link_preview_options=LinkPreviewOptions(is_disabled=True))
+                await asyncio.to_thread(finish,settings,row['booking_id'],uid,token,True)
+                continue
+            if event=='plan_conflict':
+                from app.admin_ui import fmt
+                text=tr(lang,'⚠️ Конфликт books_plans: существующие брони сохранены. Указанные занятия исключены из серии Google Calendar. Исправьте расписание или перенесите бронь.','⚠️ books_plans 일정 충돌: 기존 예약은 유지되며 해당 정기 일정은 Google Calendar에서 제외됩니다. 일정 또는 예약 시간을 변경하세요.')
+                for conflict in row['request_data'].get('conflicts',[])[:20]:
+                    text+='\n'+fmt(datetime.fromisoformat(conflict['start']))+' · #'+', #'.join(map(str,conflict['booking_ids'][:10]))
+                await bot.send_message(chat_id=chat,text=text)
+                await asyncio.to_thread(finish,settings,row['booking_id'],uid,token,True)
+                continue
             client=state.get('audience','admin')=='client'
             client_cancel=state.get('origin')=='client'
             cancelled_booking=bool((row.get('cancellation') or {}).get('cancelled_at'))

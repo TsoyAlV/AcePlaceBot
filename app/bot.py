@@ -223,6 +223,7 @@ def main() -> int:
         application.add_handler(CallbackQueryHandler(client_ui.callback, pattern=r"^cli:"))
         application.add_handler(CallbackQueryHandler(payment_ui.callback, pattern=r"^pay:"))
         application.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.Document.ALL),payment_ui.media_input))
+        application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.CONTACT,client_ui.contact_input))
         application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, text_message))
         application.add_error_handler(on_error)
         print("Starting TEST bot. Stop with Ctrl+C. Only one polling process per token.")

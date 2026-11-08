@@ -20,6 +20,8 @@ from app.rental_rules import next_cleaning, rental_price, RulesError
 from app.booking_events import enqueue_event
 from app.calendar_queue import queue_calendar
 from app.cancellation_rules import current_policy,calculate as cancellation_calculation
+from app import books_plans
+from app.booking_details import validate as validate_details
 
 
 def quote_rental(start: datetime, end: datetime) -> dict:
@@ -150,6 +152,8 @@ def get_booking(connection: Connection, actor: int, booking_id: int) -> dict:
 def list_bookings(connection: Connection, actor: int, *, limit: int | None = None, offset: int = 0, pending_only: bool = False, blocks_only: bool = False, refunds_only: bool = False) -> list[dict]:
     params = ()
     condition = " WHERE status='cancelled' AND cancellation->>'refund_status'='pending'" if refunds_only else " WHERE status <> 'cancelled'"
+    condition += " AND (request_data->>'source'='books_plans' AND request_data->>'role'='series') IS NOT TRUE"
+    condition += " AND (request_data->>'source'='books_plans' AND request_data->>'role'='occurrence' AND ends_at<=clock_timestamp()) IS NOT TRUE"
     if admin_role(connection, actor) not in ('owner', 'admin'):
         condition += ' AND user_id=%s'
         params = (_user(connection, actor),)
@@ -176,10 +180,13 @@ def is_available(connection: Connection, actor: int, start: datetime, end: datet
     if end-start<timedelta(hours=load_business_config().booking.minimum_hours):
         raise BookingError('Minimum rental duration: 5 hours')
     _,cleaning_end=_cleaning(start,end,'booking')
+    if books_plans.overlaps(load_business_config(),start,cleaning_end):
+        return False
     _legacy_check(connection)
     return not connection.execute("""SELECT EXISTS(SELECT 1 FROM bookings
         WHERE status IN ('hold','pending','confirmed')
         AND (status='confirmed' OR expires_at > clock_timestamp())
+        AND (request_data->>'source'='books_plans' AND starts_at>clock_timestamp()) IS NOT TRUE
         AND tstzrange(starts_at,COALESCE(cleaning_ends_at,ends_at),'[)') && tstzrange(%s,%s,'[)'))""", (start, cleaning_end)).fetchone()[0]
 
 
@@ -192,7 +199,7 @@ def create_booking(connection: Connection, actor: int, **kwargs) -> dict:
 
 def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
                    starts_at: datetime, ends_at: datetime, amount=None, request_key: UUID,
-                   unit='KRW', kind='booking', status='pending', ttl_minutes=None,cancellation_policy=None) -> dict:
+                   unit='KRW', kind='booking', status='pending', ttl_minutes=None,cancellation_policy=None,details=None) -> dict:
     # Manual pricing is trusted only from administrators until server tariffs exist.
     start, end = _interval(starts_at, ends_at)
     rules = load_business_config().booking
@@ -217,6 +224,14 @@ def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
         raise BookingError('Client not found')
     data = dict(actor=actor, user_id=user_id, starts_at=start.isoformat(), ends_at=end.isoformat(),
                 amount='auto' if automatic else str(amount), unit=unit, kind=kind, status=status, ttl_minutes=ttl_minutes)
+    if details is not None:
+        try:
+            details=validate_details(details)
+        except ValueError as error:
+            raise BookingError(str(error)) from None
+        if kind!='booking':
+            raise BookingError('Blocks cannot contain customer details')
+        data['details']=details
     _lock(connection)
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute('SELECT * FROM bookings WHERE request_key=%s', (request_key,))
@@ -228,6 +243,10 @@ def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
     _expire(connection)
     _legacy_check(connection)
     cleaning_start,cleaning_end=_cleaning(start,end,kind)
+    config=load_business_config()
+    books_plans.reconcile(connection,config)
+    if books_plans.overlaps(config,start,cleaning_end or end):
+        raise SlotUnavailable('Requested interval is reserved by books_plans')
     if automatic:
         if kind!='booking' or unit!=load_business_config().currency:
             raise BookingError('Automatic pricing supports KRW rental bookings only')
@@ -239,17 +258,18 @@ def _create_booking(connection: Connection, actor: int, *, user_id: int | None,
     try:
         with connection.transaction():
             booking_id = connection.execute("""INSERT INTO bookings
-                (user_id,type,status,starts_at,ends_at,expires_at,amount,unit,request_key,request_data,cleaning_starts_at,cleaning_ends_at,cancellation)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING booking_id""",
+                (user_id,type,status,starts_at,ends_at,expires_at,amount,unit,request_key,request_data,cleaning_starts_at,cleaning_ends_at,cancellation,contact_phone,guests_count,event_name)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING booking_id""",
                 (user_id,kind,status,start,end,expires,amount,unit,request_key,Jsonb(data),cleaning_start,cleaning_end,
-                 Jsonb(dict(policy=cancellation_policy or current_policy(load_business_config())) if kind=='booking' else {}))).fetchone()[0]
+                 Jsonb(dict(policy=cancellation_policy or current_policy(load_business_config())) if kind=='booking' else {}),
+                 (details or {}).get('contact_phone'),(details or {}).get('guests_count'),(details or {}).get('event_name'))).fetchone()[0]
     except ExclusionViolation:
         raise SlotUnavailable('Requested interval is occupied') from None
     return _get(connection, booking_id)
 
 
 def create_client_booking(connection: Connection, actor: int, *, starts_at: datetime,
-                          ends_at: datetime, request_key: UUID, expected_quote: dict, expected_policy: dict | None=None) -> dict:
+                          ends_at: datetime, request_key: UUID, expected_quote: dict, expected_policy: dict | None=None,details=None) -> dict:
     """Client may only book for themselves using a server quote; never accepts price/status."""
     user_id=_user(connection,actor)
     _lock(connection)
@@ -260,6 +280,13 @@ def create_client_booking(connection: Connection, actor: int, *, starts_at: date
         row=_get(connection,existing[0])
         if row['starts_at']!=starts_at or row['ends_at']!=ends_at:
             raise BookingError('Request key already used with different parameters')
+        if details is not None:
+            try:
+                answers=validate_details(details)
+            except ValueError as error:
+                raise BookingError(str(error)) from None
+            if any(row[k]!=v for k,v in answers.items()):
+                raise BookingError('Request key already used with different answers')
         return row
     if quote_rental(starts_at,ends_at)!=expected_quote:
         raise BookingError('Quote changed; request a new quote')
@@ -268,8 +295,12 @@ def create_client_booking(connection: Connection, actor: int, *, starts_at: date
     _expire(connection)
     if connection.execute("SELECT 1 FROM bookings WHERE user_id=%s AND status IN ('hold','pending') LIMIT 1",(user_id,)).fetchone():
         raise BookingError('You already have a pending request')
+    try:
+        details=validate_details(details)
+    except ValueError as error:
+        raise BookingError(str(error)) from None
     row=_create_booking(connection,actor,user_id=user_id,starts_at=starts_at,ends_at=ends_at,
-        request_key=request_key,amount=None,status='pending',cancellation_policy=expected_policy)
+        request_key=request_key,amount=None,status='pending',cancellation_policy=expected_policy,details=details)
     enqueue_event(connection,row,'created',actor=actor,origin='client')
     return _get(connection,row['booking_id'])
 
@@ -295,6 +326,8 @@ def change_booking(connection: Connection, actor: int, booking_id: int, *, actio
         raise BookingError('Unsupported action')
     _lock(connection)
     row = _get(connection, booking_id, lock=True)
+    if books_plans.managed(row):
+        raise BookingError('Регулярные блокировки изменяются в config.yaml / 정기 일정은 config.yaml에서 변경하세요.')
     privileged = admin_role(connection, actor) in ('owner', 'admin')
     if origin not in (None,'admin','client'):
         raise BookingError('Invalid operation origin')
@@ -354,6 +387,10 @@ def change_booking(connection: Connection, actor: int, booking_id: int, *, actio
             raise BookingError('Only future pending or confirmed bookings can be moved')
         expiry = min(row['expires_at'], start) if row['status'] == 'pending' else None
         cleaning_start,cleaning_end=_cleaning(start,end,row['type'])
+        config=load_business_config()
+        books_plans.reconcile(connection,config)
+        if books_plans.overlaps(config,start,cleaning_end or end):
+            raise SlotUnavailable('New interval is reserved by books_plans; original booking preserved')
         # Explicit move is allowed to recalculate cleaning, never a config edit alone.
         try:
             with connection.transaction():

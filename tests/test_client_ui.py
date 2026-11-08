@@ -35,13 +35,18 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             effective_chat=SimpleNamespace(id=actor,type='private'),effective_message=message,
             callback_query=SimpleNamespace(data=data,answer=AsyncMock()) if data else None)
 
-    async def review(self,context):
+    async def review(self,context,answers=True):
         await client_ui.callback(self.update(data='cli:new'),context)
         await client_ui.text_input(self.update(text=self.start.astimezone(client_ui.SEOUL).strftime('%Y-%m-%d')),context)
         await client_ui.text_input(self.update(text='5'),context)
         draft=context.user_data['client_draft']
         index=next(i for i,row in enumerate(draft['options']) if row['starts_at']==self.start.astimezone(client_ui.SEOUL).isoformat())
         await client_ui.callback(self.update(data=f"cli:pick:{draft['token']}:{index}"),context)
+        if not answers:
+            return draft
+        await client_ui.text_input(self.update(text='01022636263'),context)
+        await client_ui.text_input(self.update(text='40'),context)
+        await client_ui.text_input(self.update(text='Level up'),context)
         return draft
 
     async def test_complete_flow_idempotent_creation_and_withdrawal(self):
@@ -56,9 +61,58 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row['user_id'],self.client)
             self.assertEqual(row['status'],'pending')
             self.assertEqual(row['amount'],draft['quote']['amount'])
+            self.assertEqual((row['contact_phone'],row['guests_count'],row['event_name']),('01022636263',40,'Level up'))
             self.assertEqual(len(row['admin_notifications']),1)
             await client_ui.callback(self.update(data=f"cli:withdraw_yes:{row['booking_id']}:{row['version']}"),context)
             self.assertEqual(bookings.get_booking(self.c,102,row['booking_id'])['status'],'cancelled')
+
+    async def test_questions_are_required_and_invalid_answers_do_not_advance(self):
+        context=self.context()
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            draft=await self.review(context,answers=False)
+            self.assertEqual(draft['step'],'phone')
+            self.assertTrue(context.user_data['_ui_reply_keyboard'])
+            await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)
+            self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],0)
+            await client_ui.text_input(self.update(text='not a phone'),context)
+            self.assertEqual(draft['step'],'phone')
+            contact=self.update()
+            contact.effective_message.contact=SimpleNamespace(user_id=103,phone_number='01022636263')
+            await client_ui.contact_input(contact,context)
+            self.assertEqual(draft['step'],'phone')
+            contact.effective_message.contact.user_id=102
+            await client_ui.contact_input(contact,context)
+            self.assertEqual(draft['step'],'guests')
+            self.assertFalse(context.user_data['_ui_reply_keyboard'])
+            await client_ui.text_input(self.update(text='0'),context)
+            self.assertEqual(draft['step'],'guests')
+            await client_ui.text_input(self.update(text='40'),context)
+            await client_ui.text_input(self.update(text='   '),context)
+            self.assertEqual(draft['step'],'event')
+
+    async def test_edit_answers_invalidates_old_send_button_and_saves_new_answers(self):
+        context=self.context()
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            draft=await self.review(context)
+            old=draft['token']
+            await client_ui.callback(self.update(data='cli:edit:'+old),context)
+            self.assertEqual(draft['step'],'phone')
+            self.assertNotEqual(draft['token'],old)
+            for answer in ('+82 10 2263 6263','25','День рождения'):
+                await client_ui.text_input(self.update(text=answer),context)
+            await client_ui.callback(self.update(data='cli:send:'+old),context)
+            self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],0)
+            await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)
+            row=bookings.get_booking(self.c,102,draft['result_id'])
+            self.assertEqual((row['contact_phone'],row['guests_count'],row['event_name']),('+821022636263',25,'День рождения'))
+
+    async def test_cancel_questionnaire_removes_contact_keyboard(self):
+        context=self.context()
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            draft=await self.review(context,answers=False)
+            await client_ui.callback(self.update(data='cli:abort:'+draft['token']),context)
+            self.assertNotIn('client_draft',context.user_data)
+            self.assertFalse(context.user_data['_ui_reply_keyboard'])
 
     async def test_navigation_preserves_created_booking_and_bank_details(self):
         context=self.context()
@@ -110,6 +164,9 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(draft['step'],'options')
             index=next(i for i,row in enumerate(draft['options']) if row['starts_at']==self.start.astimezone(client_ui.SEOUL).isoformat())
             await client_ui.callback(self.update(data=f"cli:pick:{draft['token']}:{index}"),context)
+            self.assertEqual(draft['step'],'phone')
+            for answer in ('01022636263','40','Level up'):
+                await client_ui.text_input(self.update(text=answer),context)
             self.assertEqual(draft['step'],'review')
             self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],0)
             await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)

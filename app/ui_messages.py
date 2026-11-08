@@ -1,6 +1,7 @@
 """One temporary navigation screen; results and unknown/old messages are preserved."""
 
 from telegram.error import BadRequest,TelegramError
+from telegram import InlineKeyboardMarkup,ReplyKeyboardMarkup,ReplyKeyboardRemove
 
 
 def _ref(message,update):
@@ -30,6 +31,7 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
     if key and key in data.get('_ui_results',{}):
         return
     old=data.get('_ui_screen')
+    remove_keyboard=data.get('_ui_reply_keyboard',False) and not isinstance(reply_markup,ReplyKeyboardMarkup)
     # Only a screen registered by this running process may be edited or removed.
     # Callback messages may be receipts or durable notifications: never infer their type.
     chat=getattr(update,'effective_chat',None)
@@ -37,7 +39,7 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
         old=None
     ref=None
     message=None
-    if old and getattr(update,'callback_query',None) and getattr(context,'bot',None):
+    if old and getattr(update,'callback_query',None) and getattr(context,'bot',None) and not remove_keyboard and (reply_markup is None or isinstance(reply_markup,InlineKeyboardMarkup)):
         try:
             message=await context.bot.edit_message_text(chat_id=old[0],message_id=old[1],text=text,reply_markup=reply_markup)
             ref=old
@@ -47,8 +49,11 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
         except TelegramError:
             pass
     if ref is None:
-        message=await update.effective_message.reply_text(text,reply_markup=reply_markup)
+        message=await update.effective_message.reply_text(text,reply_markup=ReplyKeyboardRemove() if remove_keyboard else reply_markup)
         ref=_ref(message,update)
+        if remove_keyboard and isinstance(reply_markup,InlineKeyboardMarkup) and ref and getattr(context,'bot',None):
+            await context.bot.edit_message_reply_markup(chat_id=ref[0],message_id=ref[1],reply_markup=reply_markup)
+        data['_ui_reply_keyboard']=isinstance(reply_markup,ReplyKeyboardMarkup)
         # Send the next prompt before removing the previous one.
         if ref:
             await _remove(context,old)

@@ -5,8 +5,11 @@ from psycopg.types.json import Jsonb
 
 
 def queue_calendar(connection,row):
+    from app.books_plans import managed
+    if managed(row,'occurrence'):
+        return
     state=dict(row.get('calendar_sync') or {})
-    if row['status']!='confirmed' and not state:
+    if row['status']!='confirmed' and not state and not managed(row,'series'):
         return
     state.setdefault('booking_event_id',uuid4().hex)
     state.setdefault('cleaning_event_id',uuid4().hex)

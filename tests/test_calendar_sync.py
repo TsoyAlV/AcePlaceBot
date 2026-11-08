@@ -80,6 +80,22 @@ class CalendarSyncTests(unittest.TestCase):
         self.sync()
         self.assertEqual(self.remote.events,{})
 
+    def test_booking_details_and_payments_are_in_calendar_description(self):
+        row=self.change(self.create(details=dict(contact_phone='01022636263',guests_count=40,event_name='Level <up>')),'confirm')
+        self.c.execute('UPDATE bookings SET deposit_paid_amount=50000 WHERE booking_id=%s',(row['booking_id'],))
+        self.c.commit()
+        self.sync()
+        state=self.fresh(row)['calendar_sync']
+        body=self.remote.events[('test-calendar',state['booking_event_id'])]
+        for value in ('01022636263','Количество гостей: 40','Level &lt;up&gt;','Аванс получен: 50 000 KRW','К доплате: 100 000 KRW'):
+            self.assertIn(value,body['description'])
+        self.c.execute('UPDATE bookings SET balance_paid_amount=20000 WHERE booking_id=%s',(row['booking_id'],))
+        from app.calendar_queue import queue_calendar
+        queue_calendar(self.c,self.fresh(row))
+        self.c.commit()
+        self.sync()
+        self.assertIn('К доплате: 80 000 KRW',self.remote.events[('test-calendar',state['booking_event_id'])]['description'])
+
     def test_confirmation_creates_pair_in_seoul_and_different_colors(self):
         row=self.change(self.create(),'confirm')
         self.sync()

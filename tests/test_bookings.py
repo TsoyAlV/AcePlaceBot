@@ -20,8 +20,8 @@ from app.business_config import load_business_config, BusinessConfig
 class BookingTests(unittest.TestCase):
     def setUp(self):
         data=load_business_config().model_dump(by_alias=True)
+        data['cleaning']['duration_minutes']=60
         data['cleaning']['weekly']={key:[{'from':'00:00','to':'23:00'},{'from':'23:00','to':'00:00'}] for key in data['cleaning']['weekly']}
-        data['pricing']['verified_holiday_years']=[2026,2027,2030]
         rules_patch=patch('app.bookings.load_business_config',return_value=BusinessConfig.model_validate(data))
         rules_patch.start()
         self.addCleanup(rules_patch.stop)
@@ -35,7 +35,7 @@ class BookingTests(unittest.TestCase):
         with connect_database(self.settings) as connection:
             connection.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
             self.use_schema(connection)
-            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync','010_client_cancellations'):
+            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync','010_client_cancellations','011_cleaning_duration','012_booking_details'):
                 connection.execute((PROJECT_ROOT / 'migrations' / f'{name}.sql').read_text(encoding='utf-8'))
             for tg in (101,102,103,104):
                 user = register_client(connection, telegram_user_id=tg,telegram_chat_id=tg,
@@ -75,12 +75,12 @@ class BookingTests(unittest.TestCase):
         with self.assertRaises(BookingError):
             self.create(request_key=key,amount='200000')
 
-    def test_default_timeout_is_three_hours_and_minimum_is_five(self):
+    def test_default_timeout_is_twenty_four_hours_and_minimum_is_five(self):
         # Expiry uses PostgreSQL's clock, which can differ from Windows/WSL time.
         before=self.c.execute('SELECT clock_timestamp()').fetchone()[0]
         row=self.create()
         after=self.c.execute('SELECT clock_timestamp()').fetchone()[0]
-        self.assertTrue(before+timedelta(hours=3)<=row['expires_at']<=after+timedelta(hours=3))
+        self.assertTrue(before+timedelta(hours=24)<=row['expires_at']<=after+timedelta(hours=24))
         with self.assertRaises(BookingError):
             self.create(starts_at=self.end,ends_at=self.end+timedelta(hours=4))
 
@@ -110,6 +110,27 @@ class BookingTests(unittest.TestCase):
         with patch('app.bookings.load_business_config',return_value=changed):
             confirmed=self.change(row,'confirm')
         self.assertEqual(confirmed['cleaning_ends_at'],row['cleaning_ends_at'])
+
+    def test_two_hour_cleaning_blocks_next_booking_until_finish(self):
+        rules=load_business_config().model_copy(deep=True)
+        rules.cleaning.duration_minutes=120
+        with patch('app.bookings.load_business_config',return_value=rules):
+            row=self.create()
+            self.assertEqual(row['cleaning_ends_at'],self.end+timedelta(hours=2))
+            with self.assertRaises(SlotUnavailable):
+                self.create(starts_at=self.end+timedelta(hours=1),ends_at=self.end+timedelta(hours=6))
+            following=self.create(starts_at=self.end+timedelta(hours=2),ends_at=self.end+timedelta(hours=7))
+            self.assertEqual(following['starts_at'],row['cleaning_ends_at'])
+
+    def test_move_uses_new_duration_without_changing_other_bookings(self):
+        row=self.create()
+        untouched=self.create(starts_at=self.start+timedelta(days=2),ends_at=self.end+timedelta(days=2))
+        rules=load_business_config().model_copy(deep=True)
+        rules.cleaning.duration_minutes=120
+        with patch('app.bookings.load_business_config',return_value=rules):
+            moved=self.change(row,'move',starts_at=self.start+timedelta(days=1),ends_at=self.end+timedelta(days=1))
+        self.assertEqual(moved['cleaning_ends_at']-moved['cleaning_starts_at'],timedelta(hours=2))
+        self.assertEqual(get_booking(self.c,101,untouched['booking_id'])['cleaning_ends_at'],untouched['cleaning_ends_at'])
 
     def test_expiry_and_replacement(self):
         row=self.create()
@@ -164,6 +185,20 @@ class BookingTests(unittest.TestCase):
     def test_manual_block(self):
         self.create(user_id=None,kind='block',status='confirmed',amount='0')
         self.assertFalse(is_available(self.c,102,self.start,self.end))
+
+    def test_customer_details_are_required_and_idempotent_replay_cannot_change_answers(self):
+        from app.bookings import create_client_booking,quote_rental
+        key=uuid.uuid4()
+        args=dict(starts_at=self.start,ends_at=self.end,request_key=key,expected_quote=quote_rental(self.start,self.end))
+        with self.assertRaises(BookingError):
+            create_client_booking(self.c,102,**args)
+        details=dict(contact_phone='010-2263-6263',guests_count=40,event_name='Level up')
+        row=create_client_booking(self.c,102,**args,details=details)
+        self.assertEqual(row['contact_phone'],'01022636263')
+        replay=create_client_booking(self.c,102,**args,details=details)
+        self.assertEqual(row['booking_id'],replay['booking_id'])
+        with self.assertRaises(BookingError):
+            create_client_booking(self.c,102,**args,details=dict(details,guests_count=20))
 
     def test_invalid_dates_money_and_currency(self):
         for extra in (dict(starts_at=self.start.replace(tzinfo=None)),dict(ends_at=self.start),
