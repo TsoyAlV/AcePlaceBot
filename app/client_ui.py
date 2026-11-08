@@ -5,6 +5,7 @@ from datetime import datetime,timedelta
 from uuid import uuid4
 
 from telegram import InlineKeyboardButton as Button,InlineKeyboardMarkup as Markup
+from telegram import KeyboardButton,ReplyKeyboardMarkup
 
 from app.admin_ui import tr,fmt
 from app.availability import get_availability_windows
@@ -17,6 +18,7 @@ from app.database import connect_database
 from app.rental_rules import SEOUL
 from app.users import register_client
 from app.date_picker import month_keyboard,parse_month
+from app import booking_details
 
 
 def menu(lang):
@@ -53,6 +55,9 @@ def card(row,lang):
         status='expired'
     text=f"Ace Place · #{row['booking_id']}\n{statuses[status]}\n{fmt(row['starts_at'])} → {fmt(row['ends_at'])}\nAsia/Seoul\n{row['amount']} {row['unit']}"
     text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ')+f"{row['deposit_paid_amount']} {row['unit']}"
+    answers=booking_details.text(row,lang)
+    if answers:
+        text+='\n'+answers
     receipt=row.get('payment_receipt')
     if receipt:
         labels={'pending':tr(lang,'Скриншот на проверке','이미지 검토 중'),'accepted':tr(lang,'Предоплата проверена','선입금 확인됨'),'rejected':tr(lang,'Нужен другой скриншот','다른 이미지가 필요합니다')}
@@ -98,6 +103,7 @@ async def show_starts(update,context,lang,page=0):
 
 
 async def show_review(update,context,data,lang):
+    data['details']=booking_details.validate(data.get('details'))
     quote=data['quote']
     payment=load_business_config().payment
     data['deposit']=payment.deposit_amount
@@ -108,11 +114,23 @@ async def show_review(update,context,data,lang):
           +tr(lang,'Предоплата: ','선입금: ')+f'{payment.deposit_amount} KRW\n'
           +f'{payment.bank}\n{payment.account_number}\n{payment.account_holder}\n'
           +tr(lang,'Предоплата входит в полную стоимость. После отправки дождись подтверждения администратора. Перевод сам по себе не подтверждает бронь.','선입금은 총금액에 포함됩니다. 신청 후 관리자 승인을 기다려 주세요. 송금만으로 예약이 확정되지 않습니다.'))
-    text+='\n\n'+policy_text(data['cancellation_policy'],lang)
+    text+='\n\n'+booking_details.text(data['details'],lang)+'\n\n'+policy_text(data['cancellation_policy'],lang)
     data['step']='review'
     await ui.screen(update,context,text,reply_markup=Markup([
         [Button(tr(lang,'Отправить заявку','예약 신청'),callback_data='cli:send:'+data['token'])],
+        [Button(tr(lang,'Изменить ответы','답변 수정'),callback_data='cli:edit:'+data['token'])],
         [Button(tr(lang,'Прервать','중단'),callback_data='cli:abort:'+data['token'])]]))
+
+
+async def show_question(update,context,data,lang,step='phone'):
+    data['step']=step
+    texts={
+        'phone':tr(lang,'Чтобы оформить бронь, ответьте на 3 коротких вопроса.\n\n1/3. Укажите телефон для связи. Можно отправить контакт кнопкой ниже или ввести номер вручную, например: 01022636263.','예약을 위해 세 가지 질문에 답해 주세요.\n\n1/3. 연락처를 알려 주세요. 아래 버튼으로 연락처를 보내거나 전화번호를 직접 입력하세요. 예: 01022636263.'),
+        'guests':tr(lang,'2/3. Сколько гостей планируется? Введите число, например: 20.','2/3. 몇 명이 참석하나요? 숫자로 입력하세요. 예: 20.'),
+        'event':tr(lang,'3/3. Какое мероприятие планируете? Например: день рождения, встреча друзей или мастер-класс.','3/3. 어떤 행사를 계획하고 계신가요? 예: 생일 파티, 친구 모임, 워크숍.'),
+    }
+    markup=ReplyKeyboardMarkup([[KeyboardButton(tr(lang,'Поделиться контактом','연락처 공유'),request_contact=True)]],resize_keyboard=True,one_time_keyboard=True) if step=='phone' else None
+    await ui.screen(update,context,texts[step]+'\n/cancel — '+tr(lang,'прервать','중단'),reply_markup=markup)
 
 
 async def show_dates(update,context,lang,month=None,text=None):
@@ -224,13 +242,20 @@ async def callback(update,context):
                 await ui.result(update,context,card(row,lang),reply_markup=controls(row,lang),key=f"withdraw:{row['booking_id']}:{row['version']}")
             else:
                 await ui.screen(update,context,card(row,lang),reply_markup=controls(row,lang))
-        elif command in ('pick','page','send','abort'):
+        elif command in ('pick','page','send','abort','edit'):
             data=context.user_data.get('client_draft')
             if not data or data['token']!=parts[2]:
                 raise BookingError('Draft expired')
             if command=='abort':
                 context.user_data.pop('client_draft',None)
                 await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.'),reply_markup=menu(lang))
+            elif command=='edit':
+                if data['step']!='review':
+                    raise BookingError('Draft expired')
+                data['token']=uuid4().hex[:12]
+                data['key']=uuid4()
+                data['details']={}
+                await show_question(update,context,data,lang)
             elif command=='page':
                 if data['step']!='options':
                     raise BookingError('Draft expired')
@@ -244,7 +269,8 @@ async def callback(update,context):
                 data['start']=datetime.fromisoformat(data['options'][index]['starts_at'])
                 data['end']=data['start']+timedelta(hours=data['hours'])
                 data['quote']=await asyncio.to_thread(quote_rental,data['start'],data['end'])
-                await show_review(update,context,data,lang)
+                data['details']={}
+                await show_question(update,context,data,lang)
             elif command=='send':
                 if data['step']=='done':
                     row=await call(update,context,lambda c,a,u:own_booking(c,a,data['result_id']))
@@ -252,7 +278,7 @@ async def callback(update,context):
                     payment=load_business_config().payment
                     if (data['deposit'],data['payment'])!=(payment.deposit_amount,(payment.bank,payment.account_number,payment.account_holder)):
                         raise BookingError('Quote changed; request a new quote')
-                    row=await call(update,context,lambda c,a,u:create_client_booking(c,a,starts_at=data['start'],ends_at=data['end'],request_key=data['key'],expected_quote=data['quote'],expected_policy=data['cancellation_policy']))
+                    row=await call(update,context,lambda c,a,u:create_client_booking(c,a,starts_at=data['start'],ends_at=data['end'],request_key=data['key'],expected_quote=data['quote'],expected_policy=data['cancellation_policy'],details=data['details']))
                     data.update(step='done',result_id=row['booking_id'])
                     from app.notifications import wake_delivery
                     wake_delivery(context)
@@ -276,7 +302,9 @@ async def accept_date(update,context,text,lang):
     minimum=load_business_config().booking.minimum_hours
     choices=sorted({minimum,minimum+1,minimum+2,minimum+3,minimum+5,minimum+7})
     buttons=[Button(tr(lang,f'{hours} ч',f'{hours}시간'),callback_data=f"cli:hours:{data['token']}:{hours}") for hours in choices]
-    await ui.screen(update,context,tr(lang,f'Сколько часов? Минимум {minimum}. Выбери кнопкой или введи целое число.','몇 시간인가요? 최소 '+str(minimum)+'시간입니다. 버튼을 선택하거나 정수로 입력하세요.'),
+    await ui.screen(update,context,tr(lang,
+        f'На сколько часов нужна аренда? Минимум — {minimum} ч.\nВыбери длительность кнопкой или введи только число без «ч», например: {minimum}.',
+        f'몇 시간 동안 이용하시겠어요? 최소 {minimum}시간입니다.\n버튼으로 선택하거나 «시간» 없이 숫자만 입력하세요. 예: {minimum}.'),
         reply_markup=Markup([buttons[:3],buttons[3:]]))
 
 
@@ -300,27 +328,55 @@ async def accept_hours(update,context,hours,lang):
 
 async def text_input(update,context):
     data=context.user_data.get('client_draft')
-    if not data or data['step'] not in ('date','hours'):
+    if not data or data['step'] not in ('date','hours','phone','guests','event'):
         return False
     try:
         lang=await call(update,context,lambda c,a,u:u.language)
         text=update.effective_message.text.strip()
         if data['step']=='date':
             await accept_date(update,context,text,lang)
-        else:
+        elif data['step']=='hours':
             await accept_hours(update,context,int(text),lang)
+        elif data['step']=='phone':
+            data.setdefault('details',{})['contact_phone']=booking_details.phone(text)
+            await show_question(update,context,data,lang,'guests')
+        elif data['step']=='guests':
+            data['details']['guests_count']=booking_details.guests(text)
+            await show_question(update,context,data,lang,'event')
+        else:
+            data['details']['event_name']=booking_details.event(text)
+            # Recalculate after answering: tariff/cleaning config might have changed.
+            data['quote']=await asyncio.to_thread(quote_rental,data['start'],data['end'])
+            await show_review(update,context,data,lang)
     except (BookingError,ValueError) as error:
         await show_error(update,error,context)
     return True
 
 
+async def contact_input(update,context):
+    data=context.user_data.get('client_draft')
+    if not data or data.get('step')!='phone':
+        return
+    try:
+        lang=await call(update,context,lambda c,a,u:u.language)
+        contact=update.effective_message.contact
+        if contact.user_id is not None and contact.user_id!=update.effective_user.id:
+            raise ValueError('Отправьте свой контакт кнопкой или введите телефон вручную. / 본인의 연락처를 공유하거나 번호를 직접 입력하세요.')
+        data.setdefault('details',{})['contact_phone']=booking_details.phone(contact.phone_number)
+        await show_question(update,context,data,lang,'guests')
+    except (BookingError,ValueError) as error:
+        await ui.error(update,context,str(error))
+
+
 async def show_error(update,error,context=None):
-    if isinstance(error,SlotUnavailable):
+    if isinstance(error,booking_details.DetailsError):
+        text=str(error)
+    elif isinstance(error,SlotUnavailable):
         text='Это время уже заняли. Начни заново: /book. / 이미 예약된 시간입니다. /book 으로 다시 시작하세요.'
     elif isinstance(error,StaleBooking):
         text='Статус изменился. Обнови «Мои брони». / 상태가 변경되었습니다. 내 예약을 새로고침하세요.'
     elif 'Holiday calendar' in str(error):
-        text='Для этой даты ещё не проверен праздничный тариф. Обратись к администратору. / 해당 날짜의 공휴일 요금이 확인되지 않았습니다. 관리자에게 문의하세요.'
+        text='Не удалось рассчитать праздничный тариф для этой даты. Обратись к администратору. / 해당 날짜의 공휴일 요금을 계산할 수 없습니다. 관리자에게 문의하세요.'
     elif 'already have a pending' in str(error):
         text='У тебя уже есть ожидающая заявка. Открой «Мои брони». / 이미 대기 중인 신청이 있습니다. 내 예약을 확인하세요.'
     else:

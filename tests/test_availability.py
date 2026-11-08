@@ -53,6 +53,15 @@ class AvailabilityTests(unittest.TestCase):
             self.assertIn('waiting_for_cleaning',reasons)
         self.assertGreaterEqual(datetime.fromisoformat(result['available_starts'][0]['starts_at']),row['cleaning_ends_at'])
 
+    def test_two_hour_cleaning_is_respected_by_suggested_starts(self):
+        config=bookings.load_business_config().model_copy(deep=True)
+        config.cleaning.duration_minutes=120
+        with patch('app.bookings.load_business_config',return_value=config), patch('app.availability.load_business_config',return_value=config):
+            row=self.create()
+            result=self.search()
+        self.assertEqual(datetime.fromisoformat(result['available_starts'][0]['starts_at']),self.end+timedelta(hours=2))
+        self.assertEqual(datetime.fromisoformat(result['blocked'][-1]['ends_at']),row['cleaning_ends_at'])
+
     def test_outside_range_booking_can_block_proposed_cleaning(self):
         self.create(user_id=None,kind='block',status='confirmed',amount='0',
                     starts_at=self.end,ends_at=self.end+timedelta(hours=1))

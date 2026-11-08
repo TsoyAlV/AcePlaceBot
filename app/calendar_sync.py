@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+from html import escape
 from datetime import datetime,timedelta
 from uuid import uuid4
 
@@ -15,12 +16,19 @@ from app.database import connect_database
 from app.calendar_queue import queue_calendar
 from app.google_calendar import CalendarAdapter,RecreateEvent,make_service
 from app.rental_rules import SEOUL
+from app import books_plans
+from app import booking_details
 
 logger=logging.getLogger(__name__)
 
 
 def event_bodies(row,config):
     """Exactly two events for a rental, one for a manual block, none when cancelled."""
+    if books_plans.managed(row,'series'):
+        body=books_plans.event_body(row,config)
+        return {'booking':body} if body else {}
+    if books_plans.managed(row,'occurrence'):
+        return {}
     if row['status'] not in ('confirmed','completed'):
         return {}
     bid=str(row['booking_id'])
@@ -36,6 +44,11 @@ def event_bodies(row,config):
     if not row.get('cleaning_starts_at') or not row.get('cleaning_ends_at'):
         raise ValueError('Confirmed rental needs an assigned cleaning slot')
     description+='\nПлощадка занята до окончания уборки / 청소 종료까지 사용 불가: '+row['cleaning_ends_at'].astimezone(SEOUL).isoformat()
+    description+='\nДата и время: '+row['starts_at'].astimezone(SEOUL).strftime('%Y-%m-%d %H:%M')+' → '+row['ends_at'].astimezone(SEOUL).strftime('%Y-%m-%d %H:%M')
+    answers=booking_details.text(row)
+    if answers:
+        description+='\n'+escape(answers)
+    description+='\n\n'+booking_details.payment_text(row)
     return {
         'booking':body('Ace Place · Аренда / 예약 #'+bid,row['starts_at'],row['ends_at'],config.calendar.booking_color_id,description),
         'cleaning':body('Ace Place · Уборка / 청소 #'+bid,row['cleaning_starts_at'],row['cleaning_ends_at'],config.calendar.cleaning_color_id,
@@ -47,7 +60,7 @@ def prepare_existing(settings,limit=20):
     """Enabling integration can safely include already confirmed bookings."""
     with connect_database(settings) as c:
         with c.cursor(row_factory=dict_row) as cursor:
-            cursor.execute("SELECT * FROM bookings WHERE status='confirmed' AND calendar_sync='{}'::jsonb ORDER BY booking_id FOR UPDATE SKIP LOCKED LIMIT %s",(limit,))
+            cursor.execute("SELECT * FROM bookings WHERE status='confirmed' AND calendar_sync='{}'::jsonb AND request_data->>'source' IS DISTINCT FROM 'books_plans' ORDER BY booking_id FOR UPDATE SKIP LOCKED LIMIT %s",(limit,))
             rows=cursor.fetchall()
         for row in rows:
             queue_calendar(c,row)
@@ -122,6 +135,8 @@ def finish(settings,job,error=None):
 
 def sync_once(settings,adapter_factory=None,limit=20):
     config=load_business_config()
+    # Capacity plans must also work when Google integration is disabled or offline.
+    books_plans.prepare(settings,config,connect=connect_database)
     if not config.calendar.enabled or not settings.google_calendar_id:
         return 0
     prepare_existing(settings,limit)

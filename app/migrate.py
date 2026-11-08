@@ -9,7 +9,7 @@ from app.database import connect_database
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--apply', action='store_true', help='Create initial tables')
-    parser.add_argument('--migration', choices=['001_initial', '002_remove_cleaning', '003_schema_comments', '004_booking_requests', '005_cleaning_slots', '006_client_notifications', '007_change_notifications', '008_payment_receipts', '009_calendar_sync', '010_client_cancellations'], default='001_initial')
+    parser.add_argument('--migration', choices=['001_initial', '002_remove_cleaning', '003_schema_comments', '004_booking_requests', '005_cleaning_slots', '006_client_notifications', '007_change_notifications', '008_payment_receipts', '009_calendar_sync', '010_client_cancellations', '011_cleaning_duration', '012_booking_details'], default='001_initial')
     args = parser.parse_args()
     try:
         with connect_database(load_settings()) as connection:

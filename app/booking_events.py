@@ -8,6 +8,9 @@ def enqueue_event(connection,row,event,*,actor=None,origin='admin',previous=None
     queue=row['admin_notifications']
     # Supersede unsent notifications; never announce an old confirmation after cancellation.
     for state in queue.values():
+        if (state.get('event')=='review' and row['type']=='booking' and row['status'] in ('confirmed','completed')
+            and state.get('rental_end')==row['ends_at'].isoformat() and state.get('user_id')==row['user_id']):
+            continue
         if state['status'] in ('pending','processing') and state.get('event')!='receipt':
             state['status']='cancelled'
     recipients=[]
@@ -27,6 +30,8 @@ def enqueue_event(connection,row,event,*,actor=None,origin='admin',previous=None
             state['previous_end']=previous['ends_at'].isoformat()
         if event=='receipt':
             state['receipt_unique_id']=row['payment_receipt']['file_unique_id']
+        if event=='plan_conflict':
+            state['conflicts']=row['request_data'].get('conflicts',[])
         queue[key]=state
     connection.execute('UPDATE bookings SET admin_notifications=%s WHERE booking_id=%s',
         (Jsonb(queue),row['booking_id']))

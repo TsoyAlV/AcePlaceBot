@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 from app.bookings import BookingError, _interval, _user
 from app.business_config import load_business_config
 from app.rental_rules import SEOUL, RulesError, next_cleaning
+from app import books_plans
 
 
 def get_availability_windows(connection: Connection, actor: int,
@@ -31,11 +32,12 @@ def get_availability_windows(connection: Connection, actor: int,
     # Include bookings AFTER the search boundary: proposed cleaning may extend past it.
     # A single statement provides a consistent snapshot and one clock reference.
     with connection.cursor(row_factory=dict_row) as cursor:
-        cursor.execute("""SELECT statement_timestamp() AS checked_at,b.type,b.starts_at,b.ends_at,
+        cursor.execute("""SELECT statement_timestamp() AS checked_at,b.type,b.starts_at,b.ends_at,b.request_data,
             b.cleaning_starts_at,b.cleaning_ends_at
             FROM (SELECT 1) seed LEFT JOIN bookings b ON
             b.status IN ('hold','pending','confirmed')
             AND (b.status='confirmed' OR b.expires_at>statement_timestamp())
+            AND (b.request_data->>'source'='books_plans' AND b.starts_at>statement_timestamp()) IS NOT TRUE
             AND ((b.starts_at<%s AND COALESCE(b.cleaning_ends_at,b.ends_at)>%s)
                 OR (b.type='booking' AND b.cleaning_ends_at IS NULL))
             ORDER BY b.starts_at""",(end+timedelta(days=10),start))
@@ -54,12 +56,17 @@ def get_availability_windows(connection: Connection, actor: int,
     for row in rows:
         a,b=row['starts_at'],row['ends_at']
         occupied.append((a,row['cleaning_ends_at'] or b))
-        segment(a,b,'manual_block' if row['type']=='block' else 'rental')
+        segment(a,b,'planned_block' if books_plans.managed(row) else 'manual_block' if row['type']=='block' else 'rental')
         if row['cleaning_ends_at']:
             segment(b,row['cleaning_starts_at'],'waiting_for_cleaning')
             segment(row['cleaning_starts_at'],row['cleaning_ends_at'],'cleaning')
         elif row['type']=='booking':
             warnings.add('Existing active bookings need an explicit cleaning slot before new sales')
+    for _,a,b in books_plans.intervals(config,start,end+timedelta(days=10)):
+        if (a,b) in occupied:
+            continue
+        occupied.append((a,b))
+        segment(a,b,'planned_block')
     # Physical gaps are deliberately distinguished from valid >=5h rental options.
     gaps=[]
     cursor_time=start

@@ -23,7 +23,7 @@ class ChangeNotificationTests(unittest.IsolatedAsyncioTestCase):
 
     def create(self):
         with self.connection(self.settings) as c:
-            return bookings.create_client_booking(c,102,starts_at=self.start,ends_at=self.end,
+            return bookings.create_client_booking(c,102,details=dict(contact_phone='01022636263',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,
                 request_key=uuid4(),expected_quote=bookings.quote_rental(self.start,self.end))
 
     def change(self,row,action,actor=101,**kwargs):
