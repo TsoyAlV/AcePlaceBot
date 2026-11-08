@@ -120,6 +120,15 @@ class CalendarSyncTests(unittest.TestCase):
         self.sync()
         self.assertEqual(self.remote.events,{})
 
+    def test_customer_cancellation_deletes_rental_and_cleaning(self):
+        row=self.change(self.create(),'confirm')
+        self.sync()
+        with self.connection(self.settings) as c:
+            quote=bookings.quote_cancellation(c,102,row['booking_id'],expected_version=row['version'])
+            bookings.change_booking(c,102,row['booking_id'],action='cancel',origin='client',expected_version=row['version'],expected_cancellation=quote)
+        self.sync()
+        self.assertEqual(self.remote.events,{})
+
     def test_timeout_after_remote_write_retries_without_duplicates(self):
         row=self.change(self.create(),'confirm')
         self.remote.fail_after_write=True

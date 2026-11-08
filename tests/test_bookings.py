@@ -35,7 +35,7 @@ class BookingTests(unittest.TestCase):
         with connect_database(self.settings) as connection:
             connection.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
             self.use_schema(connection)
-            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync'):
+            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync','010_client_cancellations'):
                 connection.execute((PROJECT_ROOT / 'migrations' / f'{name}.sql').read_text(encoding='utf-8'))
             for tg in (101,102,103,104):
                 user = register_client(connection, telegram_user_id=tg,telegram_chat_id=tg,

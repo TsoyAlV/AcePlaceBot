@@ -10,7 +10,8 @@ from app.admin_ui import tr,fmt
 from app.availability import get_availability_windows
 from app import ui_messages as ui
 from app.bookings import (BookingError,SlotUnavailable,StaleBooking,quote_rental,
-    create_client_booking,change_booking,get_booking)
+    create_client_booking,change_booking,get_booking,quote_cancellation,CancellationTermsChanged)
+from app.cancellation_rules import current_policy,policy_for,policy_text,quote_text,cancellation_text
 from app.business_config import load_business_config
 from app.database import connect_database
 from app.rental_rules import SEOUL
@@ -58,6 +59,11 @@ def card(row,lang):
         text+='\n'+labels[receipt['review_status']]
     if status in ('pending','hold'):
         text+='\n'+tr(lang,'Ответ ожидается до: ','승인 대기 기한: ')+fmt(row['expires_at'])
+    if row['type']=='booking':
+        text+='\n\n'+policy_text(policy_for(row),lang)
+    details=cancellation_text(row,lang)
+    if details:
+        text+='\n\n'+details
     return text
 
 
@@ -66,7 +72,10 @@ def controls(row,lang):
     receipt=row.get('payment_receipt')
     if row['status'] in ('pending','confirmed','expired','cancelled') and row['deposit_paid_amount']==0 and (not receipt or receipt['review_status']=='rejected'):
         buttons.append([Button(tr(lang,'Отправить подтверждение оплаты','결제 증빙 보내기'),callback_data=f"pay:upload:{row['booking_id']}")])
-    if row['status'] in ('pending','hold') and row['expires_at']>datetime.now(SEOUL):
+    paid=row['deposit_paid_amount']+row['balance_paid_amount']
+    if row['type']=='booking' and row['starts_at']>datetime.now(SEOUL) and (row['status']=='confirmed' or (row['status'] in ('hold','pending') and paid>0 and row['expires_at']>datetime.now(SEOUL))):
+        buttons.append([Button(tr(lang,'Отменить бронь','예약 취소'),callback_data=f"cli:cancel:{row['booking_id']}:{row['version']}")])
+    elif row['status'] in ('pending','hold') and row['expires_at']>datetime.now(SEOUL):
         buttons.append([Button(tr(lang,'Отозвать заявку','신청 철회'),callback_data=f"cli:withdraw:{row['booking_id']}:{row['version']}")])
     return Markup(buttons)
 
@@ -93,11 +102,13 @@ async def show_review(update,context,data,lang):
     payment=load_business_config().payment
     data['deposit']=payment.deposit_amount
     data['payment']=(payment.bank,payment.account_number,payment.account_holder)
+    data['cancellation_policy']=current_policy(load_business_config())
     text=(f"Ace Place\n{fmt(data['start'])} → {fmt(data['end'])}\nAsia/Seoul\n"
           +tr(lang,'Полная стоимость: ','총금액: ')+f"{quote['amount']} {quote['unit']}\n"
           +tr(lang,'Предоплата: ','선입금: ')+f'{payment.deposit_amount} KRW\n'
           +f'{payment.bank}\n{payment.account_number}\n{payment.account_holder}\n'
           +tr(lang,'Предоплата входит в полную стоимость. После отправки дождись подтверждения администратора. Перевод сам по себе не подтверждает бронь.','선입금은 총금액에 포함됩니다. 신청 후 관리자 승인을 기다려 주세요. 송금만으로 예약이 확정되지 않습니다.'))
+    text+='\n\n'+policy_text(data['cancellation_policy'],lang)
     data['step']='review'
     await ui.screen(update,context,text,reply_markup=Markup([
         [Button(tr(lang,'Отправить заявку','예약 신청'),callback_data='cli:send:'+data['token'])],
@@ -116,6 +127,18 @@ async def show_dates(update,context,lang,month=None,text=None):
         reply_markup=month_keyboard('cli:cal:'+data['token'],month,today,lang))
 
 
+async def show_cancellation(update,context,row,quote,lang,changed=False):
+    token=uuid4().hex[:12]
+    context.user_data['client_cancel']=dict(token=token,booking_id=row['booking_id'],version=row['version'],quote=quote)
+    text=(tr(lang,'Условия изменились — проверь расчёт и подтверди заново.\n','조건이 변경되었습니다. 확인 후 다시 승인해 주세요.\n') if changed else '')
+    text+=card(row,lang)+'\n\n'+quote_text(quote,lang)+'\n'+tr(lang,'Отменить бронь и освободить время?','예약을 취소하고 시간을 비우시겠습니까?')
+    if (row.get('payment_receipt') or {}).get('review_status')=='pending':
+        text+='\n'+tr(lang,'Скриншот ещё не проверен: неучтённую оплату согласуй с администратором.','증빙이 아직 검토 중입니다. 미확인 결제는 관리자에게 문의하세요.')
+    await ui.screen(update,context,text,reply_markup=Markup([
+        [Button(tr(lang,'Да, отменить бронь','예약 취소 확인'),callback_data='cli:cancel_yes:'+token)],
+        [Button(tr(lang,'Сохранить бронь','예약 유지'),callback_data=f"cli:view:{row['booking_id']}")]]))
+
+
 async def callback(update,context):
     query=update.callback_query
     if not query or not query.data or not query.data.startswith('cli:'):
@@ -125,6 +148,8 @@ async def callback(update,context):
         lang=await call(update,context,lambda c,a,u:u.language)
         parts=query.data.split(':')
         command=parts[1]
+        if command in ('new','mine','view'):
+            context.user_data.pop('client_cancel',None)
         if command=='new':
             context.user_data.pop('staff_draft',None)
             context.user_data.pop('receipt_upload',None)
@@ -156,6 +181,28 @@ async def callback(update,context):
             if len(rows)>8:
                 buttons.append([Button('→',callback_data=f'cli:mine:{page+1}')])
             await ui.screen(update,context,tr(lang,'Мои брони','내 예약') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.'),reply_markup=Markup(buttons) if buttons else menu(lang))
+        elif command in ('cancel','cancel_yes'):
+            if command=='cancel':
+                bid=int(parts[2])
+                row=await call(update,context,lambda c,a,u:own_booking(c,a,bid))
+                quote=await call(update,context,lambda c,a,u:quote_cancellation(c,a,bid,expected_version=int(parts[3])))
+                await show_cancellation(update,context,row,quote,lang)
+                return
+            data=context.user_data.get('client_cancel')
+            if not data or data['token']!=parts[2]:
+                raise BookingError('Draft expired')
+            try:
+                row=await call(update,context,lambda c,a,u:change_booking(c,a,data['booking_id'],action='cancel',
+                    expected_version=data['version'],origin='client',expected_cancellation=data['quote']))
+            except CancellationTermsChanged:
+                row=await call(update,context,lambda c,a,u:own_booking(c,a,data['booking_id']))
+                quote=await call(update,context,lambda c,a,u:quote_cancellation(c,a,data['booking_id'],expected_version=data['version']))
+                await show_cancellation(update,context,row,quote,lang,changed=True)
+                return
+            context.user_data.pop('client_cancel',None)
+            from app.notifications import wake_delivery
+            wake_delivery(context)
+            await ui.result(update,context,card(row,lang),reply_markup=controls(row,lang),key=f"cancel:{row['booking_id']}:{row['version']}")
         elif command in ('view','withdraw','withdraw_yes'):
             bid=int(parts[2])
             row=await call(update,context,lambda c,a,u:own_booking(c,a,bid))
@@ -205,7 +252,7 @@ async def callback(update,context):
                     payment=load_business_config().payment
                     if (data['deposit'],data['payment'])!=(payment.deposit_amount,(payment.bank,payment.account_number,payment.account_holder)):
                         raise BookingError('Quote changed; request a new quote')
-                    row=await call(update,context,lambda c,a,u:create_client_booking(c,a,starts_at=data['start'],ends_at=data['end'],request_key=data['key'],expected_quote=data['quote']))
+                    row=await call(update,context,lambda c,a,u:create_client_booking(c,a,starts_at=data['start'],ends_at=data['end'],request_key=data['key'],expected_quote=data['quote'],expected_policy=data['cancellation_policy']))
                     data.update(step='done',result_id=row['booking_id'])
                     from app.notifications import wake_delivery
                     wake_delivery(context)

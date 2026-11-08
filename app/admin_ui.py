@@ -10,7 +10,8 @@ from telegram import InlineKeyboardButton as Button, InlineKeyboardMarkup as Mar
 
 from app import ui_messages as ui
 from app.bookings import (AccessDenied, BookingError, SlotUnavailable, StaleBooking,
-                         create_booking, change_booking, get_booking, list_bookings, parse_amount, quote_rental)
+                         create_booking, change_booking, get_booking, list_bookings, parse_amount, quote_rental,complete_refund)
+from app.cancellation_rules import cancellation_text
 from app.database import connect_database
 from app.users import admin_role, register_client
 from app.business_config import load_business_config
@@ -31,6 +32,7 @@ def menu(lang,owner=False):
         [Button(tr(lang,'Создать заявку','예약 신청 만들기'),callback_data='adm:new:booking'),
          Button(tr(lang,'Блокировать время','시간 차단'),callback_data='adm:new:block')],
         [Button(tr(lang,'Блокировки','시간 차단 목록'),callback_data='adm:list:blocks:0')],
+        [Button(tr(lang,'Ожидают возврата','환불 대기'),callback_data='adm:list:refunds:0')],
     ]
     if owner:
         buttons.append([Button(tr(lang,'Администраторы','관리자'),callback_data='staff:list:0')])
@@ -69,6 +71,9 @@ def card(row, lang):
         text+='\nGoogle Calendar: '+sync.get('status','pending')
         if sync.get('last_error'):
             text+=' · '+sync['last_error']
+    details=cancellation_text(row,lang)
+    if details:
+        text+='\n\n'+details
     return text
 
 
@@ -77,6 +82,8 @@ def controls(row, lang):
     buttons = []
     from app.payment_ui import admin_controls
     buttons.extend(admin_controls(row,lang))
+    if row['status']=='cancelled' and (row.get('cancellation') or {}).get('refund_status')=='pending':
+        buttons.append([Button(tr(lang,'Возврат выполнен','환불 완료'),callback_data=f'adm:ask:refund:{bid}:{version}')])
     if row['status']=='pending':
         buttons.append([Button(tr(lang,'Подтвердить','승인'),callback_data=f'adm:ask:confirm:{bid}:{version}')])
     if row['status']=='hold':
@@ -200,6 +207,7 @@ async def review(update, data, lang, context):
               'confirm':tr(lang,'Подтвердить бронь? Проверь поступление оплаты в банке.','예약을 승인하시겠습니까? 은행 입금을 확인하세요.'),
               'submit':tr(lang,'Отправить на подтверждение?','승인 요청을 보내시겠습니까?'),
               'cancel':tr(lang,'Отменить запись и освободить время?','취소하고 시간을 비우시겠습니까?'),
+              'refund':tr(lang,'Подтверждаешь фактический возврат указанной суммы в банке?','은행에서 표시된 금액을 실제 환불했습니까?'),
               'move':tr(lang,'Перенести? Согласованная стоимость сохраняется.','일정을 변경하시겠습니까? 합의된 금액은 유지됩니다.')}
     text=labels[data['action']]
     if data['action']=='create' and data.get('kind')=='block':
@@ -231,6 +239,7 @@ async def callback(update, context):
     try:
         lang=await call(update,context,lambda c,a,l:l)
         context.user_data.pop('staff_draft',None)
+        context.user_data.pop('client_cancel',None)
         parts=query.data.split(':')
         command=parts[1]
         if command=='menu':
@@ -238,9 +247,9 @@ async def callback(update, context):
             await ui.screen(update,context,tr(lang,'Меню администратора','관리자 메뉴'),reply_markup=menu(lang,owner=owner))
         elif command=='list':
             mode,page=parts[2],int(parts[3])
-            if mode not in ('all','pending','blocks') or not 0<=page<=100000:
+            if mode not in ('all','pending','blocks','refunds') or not 0<=page<=100000:
                 raise BookingError('Invalid page')
-            rows=await call(update,context,lambda c,a,l:list_bookings(c,a,limit=9,offset=page*8,pending_only=mode=='pending',blocks_only=mode=='blocks'))
+            rows=await call(update,context,lambda c,a,l:list_bookings(c,a,limit=9,offset=page*8,pending_only=mode=='pending',blocks_only=mode=='blocks',refunds_only=mode=='refunds'))
             buttons=[[Button(f"#{r['booking_id']} · "+(tr(lang,'Блокировка','시간 차단') if r['type']=='block' else tr(lang,'Бронь','예약'))+f" · {fmt(r['starts_at'])}",callback_data=f"adm:view:{r['booking_id']}")] for r in rows[:8]]
             nav=[]
             if page:
@@ -290,7 +299,7 @@ async def callback(update, context):
             context.user_data.pop('receipt_upload',None)
             context.user_data.pop('client_draft',None)
             action,bid,version=parts[2],int(parts[3]),int(parts[4])
-            if action not in ('confirm','cancel','submit','move'):
+            if action not in ('confirm','cancel','submit','move','refund'):
                 raise BookingError('Invalid action')
             row=await call(update,context,lambda c,a,l:get_booking(c,a,bid))
             if row['version']!=version:
@@ -322,6 +331,8 @@ async def callback(update, context):
                         starts_at=data['start'],ends_at=data['end'],amount=None if data.get('automatic_price') else data['amount'],unit=data['unit'],
                         request_key=data['request_key'],kind=data['kind'],status='confirmed' if data['kind']=='block' else 'pending')
                 result=await call(update,context,create_reviewed)
+            elif data['action']=='refund':
+                result=await call(update,context,lambda c,a,l:complete_refund(c,a,data['row']['booking_id'],expected_version=data['row']['version']))
             else:
                 result=await call(update,context,lambda c,a,l:change_booking(c,a,data['row']['booking_id'],action=data['action'],
                     expected_version=data['row']['version'],starts_at=data.get('start'),ends_at=data.get('end')))

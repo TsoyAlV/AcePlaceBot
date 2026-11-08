@@ -16,16 +16,16 @@ from telegram.ext import (
 from app.config import load_settings
 from app.database import check_database, connect_database
 from app.users import register_client, set_language, admin_role
-from app import admin_ui,client_ui,notifications,payment_ui,calendar_sync,expiry_worker,staff_ui
+from app import admin_ui,client_ui,notifications,payment_ui,calendar_sync,expiry_worker,staff_ui,command_menu
 from app import ui_messages as ui
 
 logger = logging.getLogger(__name__)
 
 WELCOME = {
     "ru": "Ace Place — бронирование party room.\n"
-    "Выбери язык. Команда /myid покажет твой Telegram ID.",
+    "Выбери язык. Команда /get_user_id покажет твой Telegram ID.",
     "ko": "Ace Place 파티룸 예약입니다.\n"
-    "언어를 선택해 주세요. /myid 명령으로 Telegram ID를 확인할 수 있습니다.",
+    "언어를 선택해 주세요. /get_user_id 명령으로 Telegram ID를 확인할 수 있습니다.",
 }
 
 
@@ -36,11 +36,14 @@ async def current_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     def save():
         with connect_database(context.bot_data['settings']) as connection:
-            return register_client(
+            client=register_client(
                 connection, telegram_user_id=user.id, telegram_chat_id=chat.id,
                 name=user.full_name, username=user.username, language_code=user.language_code,
             )
-    return await asyncio.to_thread(save)
+            return client,admin_role(connection,user.id)
+    client,role=await asyncio.to_thread(save)
+    await command_menu.sync_profile(context,chat.id,client.language,role)
+    return client
 
 
 def language_keyboard(lang='ru') -> InlineKeyboardMarkup:
@@ -56,6 +59,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if getattr(context,'user_data',None) is not None:
             context.user_data.pop('admin_draft',None)
             context.user_data.pop('client_draft',None)
+            context.user_data.pop('client_cancel',None)
             context.user_data.pop('receipt_upload',None)
             context.user_data.pop('staff_draft',None)
         await ui.screen(update,context,
@@ -77,7 +81,9 @@ async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     def save():
         with connect_database(context.bot_data['settings']) as connection:
             set_language(connection, client.telegram_user_id, selected)
-    await asyncio.to_thread(save)
+            return admin_role(connection,client.telegram_user_id)
+    role=await asyncio.to_thread(save)
+    await command_menu.sync_profile(context,getattr(update.effective_chat,'id',None),selected,role)
     if query.message and query.message.text == WELCOME[selected]:
         return
     await ui.screen(update,context,WELCOME[selected], reply_markup=language_keyboard(selected))
@@ -101,6 +107,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if getattr(context, 'user_data', None) is not None:
         context.user_data.pop('admin_draft', None)
         context.user_data.pop('client_draft', None)
+        context.user_data.pop('client_cancel', None)
         context.user_data.pop('receipt_upload',None)
         context.user_data.pop('staff_draft',None)
     if role is None:
@@ -137,6 +144,7 @@ async def book_command(update,context):
     context.user_data.pop('admin_draft',None)
     context.user_data.pop('receipt_upload',None)
     context.user_data.pop('staff_draft',None)
+    context.user_data.pop('client_cancel',None)
     from uuid import uuid4
     client=await current_client(update,context)
     context.user_data['client_draft']=dict(token=uuid4().hex[:12],key=uuid4(),step='date')
@@ -148,6 +156,7 @@ async def cancel_command(update,context):
     context.user_data.pop('staff_draft',None)
     context.user_data.pop('admin_draft',None)
     context.user_data.pop('client_draft',None)
+    context.user_data.pop('client_cancel',None)
     context.user_data.pop('receipt_upload',None)
     lang,role=await client_ui.call(update,context,lambda c,a,u:(u.language,admin_role(c,a)))
     markup=admin_ui.menu(lang,owner=role=='owner') if admin_flow and role in ('owner','admin') else client_ui.menu(lang)
@@ -171,9 +180,11 @@ async def start_background(application):
     await notifications.start_delivery(application)
     await calendar_sync.start(application)
     await expiry_worker.start(application)
+    await command_menu.start(application)
 
 
 async def stop_background(application):
+    await command_menu.stop(application)
     await expiry_worker.stop(application)
     await calendar_sync.stop(application)
     await notifications.stop_delivery(application)
@@ -202,7 +213,7 @@ def main() -> int:
         application = Application.builder().token(settings.telegram_test_token).post_init(start_background).post_shutdown(stop_background).build()
         application.bot_data['settings'] = settings
         application.add_handler(CommandHandler(["start", "help", "language"], start, filters=filters.ChatType.PRIVATE))
-        application.add_handler(CommandHandler("myid", my_id, filters=filters.ChatType.PRIVATE))
+        application.add_handler(CommandHandler(["myid","get_user_id"], my_id, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler("admin", admin_menu, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler("book", book_command, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler("cancel", cancel_command, filters=filters.ChatType.PRIVATE))

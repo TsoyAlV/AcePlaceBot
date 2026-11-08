@@ -7,6 +7,8 @@ calendar:
   cleaning_color_id: "6"
   block_color_id: "8"
 currency: KRW
+cancellation:
+  refund_cutoff_hours: 72 # Менее 72 часов: удерживается только полученная предоплата, остаток возвращается.
 notifications:
   cleaning:
     hours_before: 1 # За сколько часов до назначенной уборки уведомлять администраторов.
