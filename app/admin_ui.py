@@ -237,6 +237,9 @@ async def review(update, data, lang, context):
         [Button(tr(lang,'Да, выполнить','실행'),callback_data='adm:apply:'+data['token'])],
         [Button(tr(lang,'Прервать','중단'),callback_data='adm:abort:'+data['token'])],
     ]))
+    ref=context.user_data.get('_ui_screen')
+    if ref:
+        data.setdefault('action_messages',[]).append(list(ref))
 
 
 async def callback(update, context):
@@ -313,6 +316,9 @@ async def callback(update, context):
             if row['version']!=version:
                 raise StaleBooking('Reload booking')
             data=draft(context,action=action,row=row,step='start' if action=='move' else 'review')
+            source=ui.action_source(update)
+            if source:
+                data['action_messages']=[source]
             if action=='move':
                 await prompt(update,data,lang,context)
             else:
@@ -327,7 +333,7 @@ async def callback(update, context):
                 return
             if data['step']=='done':
                 current=await call(update,context,lambda c,a,l:get_booking(c,a,data['result']['booking_id']))
-                await ui.result(update,context,card(current,lang),reply_markup=controls(current,lang),key=f"admin:{current['booking_id']}:{current['version']}")
+                await ui.result(update,context,card(current,lang),reply_markup=controls(current,lang),key=f"admin:{current['booking_id']}:{current['version']}",retire_refs=data.get('action_messages',()))
                 return
             if data['step']!='review':
                 raise BookingError('Complete the form first')
@@ -347,7 +353,7 @@ async def callback(update, context):
             data.update(step='done',result=result)
             from app.notifications import wake_delivery
             wake_delivery(context)
-            await ui.result(update,context,card(result,lang),reply_markup=controls(result,lang),key=f"admin:{result['booking_id']}:{result['version']}")
+            await ui.result(update,context,card(result,lang),reply_markup=controls(result,lang),key=f"admin:{result['booking_id']}:{result['version']}",retire_refs=data.get('action_messages',()))
     except (BookingError,ValueError,IndexError) as error:
         await show_error(update,error,context)
 

@@ -35,11 +35,11 @@ def get_availability_windows(connection: Connection, actor: int,
         cursor.execute("""SELECT statement_timestamp() AS checked_at,b.type,b.starts_at,b.ends_at,b.request_data,
             b.cleaning_starts_at,b.cleaning_ends_at
             FROM (SELECT 1) seed LEFT JOIN bookings b ON
-            b.status IN ('hold','pending','confirmed')
-            AND (b.status='confirmed' OR b.expires_at>statement_timestamp())
+            (b.status IN ('hold','pending','confirmed') OR (b.type='booking' AND b.status='completed'))
+            AND (b.status IN ('confirmed','completed') OR b.expires_at>statement_timestamp())
             AND (b.request_data->>'source'='books_plans' AND b.starts_at>statement_timestamp()) IS NOT TRUE
             AND ((b.starts_at<%s AND COALESCE(b.cleaning_ends_at,b.ends_at)>%s)
-                OR (b.type='booking' AND b.cleaning_ends_at IS NULL))
+                OR (b.type='booking' AND b.status<>'completed' AND b.cleaning_ends_at IS NULL))
             ORDER BY b.starts_at""",(end+timedelta(days=10),start))
         records=cursor.fetchall()
     now=records[0]['checked_at']

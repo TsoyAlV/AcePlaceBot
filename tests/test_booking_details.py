@@ -6,9 +6,9 @@ from app import booking_details
 
 class BookingDetailsTests(unittest.TestCase):
     def test_phone_preserves_leading_zero_and_normalizes_international_format(self):
-        self.assertEqual(booking_details.phone('010-2263-6263'),'01022636263')
-        self.assertEqual(booking_details.phone('+82 (10) 2263-6263'),'+821022636263')
-        for value in ('123','abcdefghi','01022\n636263','++821022636263','1'*16):
+        self.assertEqual(booking_details.phone('000-0000-0000'),'00000000000')
+        self.assertEqual(booking_details.phone('+00 (00) 0000-0000'),'+000000000000')
+        for value in ('123','abcdefghi','00000\n000000','++000000000000','1'*16):
             with self.subTest(value=value),self.assertRaises(ValueError):
                 booking_details.phone(value)
 

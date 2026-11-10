@@ -9,7 +9,7 @@ def queue_calendar(connection,row):
     if managed(row,'occurrence'):
         return
     state=dict(row.get('calendar_sync') or {})
-    if row['status']!='confirmed' and not state and not managed(row,'series'):
+    if row['status'] not in ('confirmed','completed') and not state and not managed(row,'series'):
         return
     state.setdefault('booking_event_id',uuid4().hex)
     state.setdefault('cleaning_event_id',uuid4().hex)

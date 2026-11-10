@@ -45,7 +45,7 @@ def prepare_cleaning_reminders(settings):
         if not recipients:
             return
         with c.cursor(row_factory=dict_row) as cursor:
-            cursor.execute("""SELECT * FROM bookings WHERE type='booking' AND status='confirmed'
+            cursor.execute("""SELECT * FROM bookings WHERE type='booking' AND status IN ('confirmed','completed')
                 AND cleaning_starts_at>clock_timestamp()
                 AND cleaning_starts_at<=clock_timestamp()+%s
                 ORDER BY cleaning_starts_at FOR UPDATE SKIP LOCKED""",(timedelta(hours=rules.hours_before),))
@@ -92,7 +92,7 @@ def claim(settings):
                         continue
                 elif state.get('event')=='cleaning_reminder':
                     start=row.get('cleaning_starts_at')
-                    stale=(not cleaning_rules.telegram_enabled or row['status']!='confirmed' or row['type']!='booking'
+                    stale=(not cleaning_rules.telegram_enabled or row['status'] not in ('confirmed','completed') or row['type']!='booking'
                         or start is None or start.isoformat()!=state.get('cleaning_start') or start<=now)
                     if not stale and start-timedelta(hours=cleaning_rules.hours_before)>now:
                         continue

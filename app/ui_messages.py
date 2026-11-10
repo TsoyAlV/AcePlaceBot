@@ -77,8 +77,27 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
     return message
 
 
-async def result(update,context,text,*,reply_markup=None,key=None):
-    return await screen(update,context,text,reply_markup=reply_markup,keep=True,key=key)
+async def result(update,context,text,*,reply_markup=None,key=None,retire_refs=()):
+    message=await screen(update,context,text,reply_markup=reply_markup,keep=True,key=key)
+    # Explicitly supplied action cards are superseded only after the result exists.
+    # Ordinary notifications, receipts and unrelated navigation are never inferred here.
+    data=getattr(context,'user_data',None) or {}
+    result_ref=data.get('_ui_results',{}).get(key) if key else _ref(message,update)
+    if result_ref:
+        seen=set()
+        for ref in retire_refs:
+            if ref and ref!=result_ref and ref[0]==getattr(update.effective_chat,'id',None) and tuple(ref) not in seen:
+                seen.add(tuple(ref))
+                await _remove(context,ref)
+    return message
+
+
+def action_source(update):
+    """For an authenticated, validated action only; media messages stay intact."""
+    message=getattr(update,'effective_message',None)
+    if not getattr(update,'callback_query',None) or not isinstance(getattr(message,'text',None),str):
+        return None
+    return _ref(message,update)
 
 
 async def error(update,context,text):

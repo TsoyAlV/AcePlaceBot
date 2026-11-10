@@ -74,6 +74,34 @@ class AdminUITests(unittest.IsolatedAsyncioTestCase):
                 await admin_ui.callback(self.update(data='adm:apply:'+data['token']),context)
         self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],1)
 
+    async def test_confirmation_retires_notification_and_old_confirmation_after_navigation(self):
+        context=self.context()
+        context.bot=SimpleNamespace(edit_message_text=AsyncMock(),delete_message=AsyncMock(),edit_message_reply_markup=AsyncMock())
+        with patch('app.admin_ui.connect_database',side_effect=self.connection):
+            data=await self.build_draft(context)
+            await admin_ui.callback(self.update(data='adm:apply:'+data['token']),context)
+            row=data['result']
+            # A separate notification is clicked while an older menu is tracked.
+            context.user_data['_ui_screen']=[101,50]
+            update=self.update(text='Новая заявка',data=f"adm:ask:confirm:{row['booking_id']}:{row['version']}")
+            update.effective_message.message_id=60
+            await admin_ui.callback(update,context)
+            data=context.user_data['admin_draft']
+            # The admin navigates elsewhere before pressing the existing confirmation.
+            context.user_data['_ui_screen']=[101,70]
+            apply=self.update(text='Подтвердить бронь?',data='adm:apply:'+data['token'])
+            apply.effective_message.message_id=50
+            await admin_ui.callback(apply,context)
+            self.assertEqual(data['result']['status'],'confirmed')
+            deleted=[call.kwargs['message_id'] for call in context.bot.delete_message.call_args_list]
+            self.assertIn(60,deleted)
+            self.assertIn(50,deleted)
+            self.assertNotIn(70,deleted)
+            self.assertEqual(context.bot.edit_message_text.call_args.kwargs['message_id'],70)
+            self.assertIn('Подтверждено',context.bot.edit_message_text.call_args.kwargs['text'])
+            await admin_ui.callback(apply,context)
+            self.assertEqual(self.c.execute('SELECT status FROM bookings WHERE booking_id=%s',(row['booking_id'],)).fetchone()[0],'confirmed')
+
     async def pick_datetime(self,context,data,stage,value):
         day=value.astimezone(admin_ui.SEOUL).date().isoformat()
         hour=value.astimezone(admin_ui.SEOUL).hour

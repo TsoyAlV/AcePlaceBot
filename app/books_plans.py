@@ -100,8 +100,8 @@ def reconcile(c,config,now=None):
     for key,a,b in intervals(config,now,until):
         desired[(key,a.isoformat())]=(a,b)
     ordinary=_rows(c,"""SELECT booking_id,starts_at,COALESCE(cleaning_ends_at,ends_at) AS occupied_end
-        FROM bookings WHERE status IN ('hold','pending','confirmed')
-        AND (status='confirmed' OR expires_at>%s)
+        FROM bookings WHERE (status IN ('hold','pending','confirmed') OR (type='booking' AND status='completed'))
+        AND (status IN ('confirmed','completed') OR expires_at>%s)
         AND request_data->>'source' IS DISTINCT FROM %s
         AND starts_at<%s AND COALESCE(cleaning_ends_at,ends_at)>%s""",(now,SOURCE,until,now))
     running=[r for r in rows if managed(r,'occurrence') and r['status']=='confirmed'

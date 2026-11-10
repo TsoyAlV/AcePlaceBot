@@ -133,6 +133,19 @@ def expire_bookings(connection: Connection) -> int:
     return _expire(connection)
 
 
+def complete_bookings(connection: Connection) -> int:
+    """Finish rentals at ends_at, preserving cleanup, payment and review jobs."""
+    _lock(connection)
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("""UPDATE bookings SET status='completed'
+            WHERE type='booking' AND status='confirmed' AND ends_at<=clock_timestamp()
+            RETURNING *""")
+        rows=cursor.fetchall()
+    for row in rows:
+        queue_calendar(connection,row)
+    return len(rows)
+
+
 def _get(connection: Connection, booking_id: int, *, lock=False) -> dict:
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute('SELECT * FROM bookings WHERE booking_id=%s' + (' FOR UPDATE' if lock else ''), (booking_id,))
@@ -157,6 +170,8 @@ def list_bookings(connection: Connection, actor: int, *, limit: int | None = Non
     if admin_role(connection, actor) not in ('owner', 'admin'):
         condition += ' AND user_id=%s'
         params = (_user(connection, actor),)
+    elif not refunds_only:
+        condition += " AND status<>'completed' AND ends_at>statement_timestamp()"
     if pending_only:
         condition += (' AND ' if condition else ' WHERE ') + "status='pending'"
     if blocks_only:
@@ -184,8 +199,8 @@ def is_available(connection: Connection, actor: int, start: datetime, end: datet
         return False
     _legacy_check(connection)
     return not connection.execute("""SELECT EXISTS(SELECT 1 FROM bookings
-        WHERE status IN ('hold','pending','confirmed')
-        AND (status='confirmed' OR expires_at > clock_timestamp())
+        WHERE (status IN ('hold','pending','confirmed') OR (type='booking' AND status='completed'))
+        AND (status IN ('confirmed','completed') OR expires_at > clock_timestamp())
         AND (request_data->>'source'='books_plans' AND starts_at>clock_timestamp()) IS NOT TRUE
         AND tstzrange(starts_at,COALESCE(cleaning_ends_at,ends_at),'[)') && tstzrange(%s,%s,'[)'))""", (start, cleaning_end)).fetchone()[0]
 

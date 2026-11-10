@@ -87,6 +87,9 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any('Спасибо, что выбрали' in c.kwargs['text'] for c in bot.send_message.call_args_list))
         self.assertEqual(self.fresh(row)['version'],row['version'])
         self.end_rental(row,hours_ago=2)
+        with self.connection(self.settings) as c:
+            bookings.complete_bookings(c)
+        self.assertEqual(self.fresh(row)['status'],'completed')
         bot=await self.deliver()
         bot.send_message.assert_awaited_once()
         message=bot.send_message.call_args.kwargs
