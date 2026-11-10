@@ -5,7 +5,7 @@ import asyncio
 import logging
 import time
 
-from app.bookings import expire_bookings
+from app.bookings import expire_bookings,complete_bookings
 from app.config import load_settings
 from app.database import connect_database
 
@@ -15,7 +15,7 @@ logger=logging.getLogger(__name__)
 
 def sweep(settings):
     with connect_database(settings) as connection:
-        return expire_bookings(connection)
+        return expire_bookings(connection)+complete_bookings(connection)
 
 
 async def loop(application):
@@ -53,7 +53,7 @@ def main() -> int:
         while True:
             try:
                 count = sweep(settings)
-                print(f'Expired requests: {count}', flush=True)
+                print(f'Updated bookings (expired/completed): {count}', flush=True)
             except Exception as error:
                 print(f'Expiry sweep failed ({type(error).__name__}); retry in 30 seconds.', flush=True)
                 if args.once:

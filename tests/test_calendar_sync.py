@@ -80,14 +80,27 @@ class CalendarSyncTests(unittest.TestCase):
         self.sync()
         self.assertEqual(self.remote.events,{})
 
+    def test_completion_keeps_calendar_rental_and_cleaning(self):
+        row=self.change(self.create(),'confirm')
+        self.sync()
+        ids=set(self.remote.events)
+        end=self.c.execute("SELECT clock_timestamp()-interval '1 minute'").fetchone()[0]
+        self.c.execute('UPDATE bookings SET starts_at=%s,ends_at=%s WHERE booking_id=%s',
+            (end-timedelta(hours=5),end,row['booking_id']))
+        bookings.complete_bookings(self.c)
+        self.c.commit()
+        self.sync()
+        self.assertEqual(self.fresh(row)['status'],'completed')
+        self.assertEqual(set(self.remote.events),ids)
+
     def test_booking_details_and_payments_are_in_calendar_description(self):
-        row=self.change(self.create(details=dict(contact_phone='01022636263',guests_count=40,event_name='Level <up>')),'confirm')
+        row=self.change(self.create(details=dict(contact_phone='00000000000',guests_count=40,event_name='Level <up>')),'confirm')
         self.c.execute('UPDATE bookings SET deposit_paid_amount=50000 WHERE booking_id=%s',(row['booking_id'],))
         self.c.commit()
         self.sync()
         state=self.fresh(row)['calendar_sync']
         body=self.remote.events[('test-calendar',state['booking_event_id'])]
-        for value in ('01022636263','Количество гостей: 40','Level &lt;up&gt;','Аванс получен: 50 000 KRW','К доплате: 100 000 KRW'):
+        for value in ('00000000000','Количество гостей: 40','Level &lt;up&gt;','Аванс получен: 50 000 KRW','К доплате: 100 000 KRW'):
             self.assertIn(value,body['description'])
         self.c.execute('UPDATE bookings SET balance_paid_amount=20000 WHERE booking_id=%s',(row['booking_id'],))
         from app.calendar_queue import queue_calendar

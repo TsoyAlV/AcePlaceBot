@@ -103,7 +103,7 @@ class PlannedBookingTests(unittest.TestCase):
             self.create(user_id=None,kind='block',status='confirmed',amount='0')
         quote=bookings.quote_rental(self.start,self.end)
         with self.assertRaises(bookings.SlotUnavailable):
-            bookings.create_client_booking(self.c,102,details=dict(contact_phone='01022636263',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,
+            bookings.create_client_booking(self.c,102,details=dict(contact_phone='00000000000',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,
                 request_key=uuid4(),expected_quote=quote)
 
     def test_virtual_schedule_protects_dates_beyond_generation_horizon(self):

@@ -35,7 +35,7 @@ class BookingTests(unittest.TestCase):
         with connect_database(self.settings) as connection:
             connection.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
             self.use_schema(connection)
-            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync','010_client_cancellations','011_cleaning_duration','012_booking_details'):
+            for name in ('001_initial','002_remove_cleaning','004_booking_requests','005_cleaning_slots','006_client_notifications','008_payment_receipts','009_calendar_sync','010_client_cancellations','011_cleaning_duration','012_booking_details','013_completed_bookings'):
                 connection.execute((PROJECT_ROOT / 'migrations' / f'{name}.sql').read_text(encoding='utf-8'))
             for tg in (101,102,103,104):
                 user = register_client(connection, telegram_user_id=tg,telegram_chat_id=tg,
@@ -192,9 +192,9 @@ class BookingTests(unittest.TestCase):
         args=dict(starts_at=self.start,ends_at=self.end,request_key=key,expected_quote=quote_rental(self.start,self.end))
         with self.assertRaises(BookingError):
             create_client_booking(self.c,102,**args)
-        details=dict(contact_phone='010-2263-6263',guests_count=40,event_name='Level up')
+        details=dict(contact_phone='000-0000-0000',guests_count=40,event_name='Level up')
         row=create_client_booking(self.c,102,**args,details=details)
-        self.assertEqual(row['contact_phone'],'01022636263')
+        self.assertEqual(row['contact_phone'],'00000000000')
         replay=create_client_booking(self.c,102,**args,details=details)
         self.assertEqual(row['booking_id'],replay['booking_id'])
         with self.assertRaises(BookingError):

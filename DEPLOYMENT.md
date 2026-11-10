@@ -274,7 +274,7 @@ docker compose --profile bot run --rm --no-deps bot python -m app.check_db
 
 ### Если нужна полностью новая пустая база
 
-Это альтернативный путь, а не продолжение восстановления. Для проекта без переносимых данных пропустите импорт архива и примените миграции `001_initial`–`012_booking_details` по порядку, как в `README.md`. Затем создайте первого владельца. Не выполняйте одновременно и миграции начальной схемы, и импорт полного дампа. Если импортируется старый дамп с версией схемы до `009`, перед запуском нового кода дополнительно примените `010_client_cancellations`, `011_cleaning_duration` и `012_booking_details` по порядку. Если `010` уже применена, примените `011` и затем `012_booking_details`. Если `011` уже применена, нужна только `012_booking_details`.
+Это альтернативный путь, а не продолжение восстановления. Для проекта без переносимых данных пропустите импорт архива и примените миграции `001_initial`–`013_completed_bookings` по порядку, как в `README.md`. Затем создайте первого владельца. Не выполняйте одновременно и миграции начальной схемы, и импорт полного дампа. Если импортирован дамп старой версии, перед запуском нового кода примените все отсутствующие миграции по порядку до `013_completed_bookings`. Например, после `010` нужны `011`, `012` и `013`; после `012` — только `013`.
 
 ## 8. Проверить Google и запустить бота
 
@@ -451,6 +451,8 @@ cd /opt/ace-place
 docker compose --profile bot stop bot
 docker compose --profile bot build bot
 docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 011_cleaning_duration
+docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 012_booking_details
+docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 013_completed_bookings
 docker compose --profile bot up -d bot
 ```
 
@@ -465,7 +467,22 @@ cd /opt/ace-place
 docker compose --profile bot stop bot
 docker compose --profile bot build bot
 docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 012_booking_details
+docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 013_completed_bookings
 docker compose --profile bot up -d bot
 ```
 
 Миграция добавляет в `bookings` телефон, количество гостей и мероприятие. Старые брони остаются с пустыми полями; новых таблиц нет. Не применяйте миграцию повторно. Если схема старее `011`, сначала примените отсутствующие миграции по порядку.
+
+### Автоматическое завершение аренды (013)
+
+Для БД с уже применёнными миграциями до `012` после получения нового кода:
+
+```bash
+cd /opt/ace-place
+docker compose --profile bot stop bot
+docker compose --profile bot build bot
+docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 013_completed_bookings
+docker compose --profile bot up -d bot
+```
+
+Миграция расширяет защиту занятости на уборку завершённых аренд. При запуске фоновой задачи прошедшие подтверждённые брони получают `completed` и скрываются из списка администратора; история и события Google сохраняются. Дополнительный worker запускать не нужно. Не применяйте уже применённые миграции повторно; если схема старее `012`, сначала примените отсутствующие миграции по порядку.

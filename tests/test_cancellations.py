@@ -154,7 +154,7 @@ class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
         config.cancellation.refund_cutoff_hours=48
         with self.connection(self.settings) as c,patch('app.bookings.load_business_config',return_value=config):
             with self.assertRaises(bookings.BookingError):
-                bookings.create_client_booking(c,102,details=dict(contact_phone='01022636263',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,
+                bookings.create_client_booking(c,102,details=dict(contact_phone='00000000000',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,
                     request_key=uuid4(),expected_quote=quote,expected_policy=policy)
         self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],0)
 

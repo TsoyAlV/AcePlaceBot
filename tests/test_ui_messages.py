@@ -57,6 +57,22 @@ class UIMessagesTests(unittest.IsolatedAsyncioTestCase):
         await ui.result(update,self.context,'Created',key='create:42')
         update.effective_message.reply_text.assert_awaited_once()
 
+    async def test_success_retires_only_explicit_action_cards_and_keeps_result(self):
+        self.context.user_data['_ui_screen']=[10,7]
+        await ui.result(self.update(mid=6),self.context,'Confirmed',key='confirm:42',
+            retire_refs=([10,5],[10,6],[10,7],[10,5],[99,8]))
+        deleted=[call.kwargs['message_id'] for call in self.bot.delete_message.call_args_list]
+        self.assertEqual(deleted,[5,6])
+        self.assertEqual(self.context.user_data['_ui_results']['confirm:42'],[10,7])
+
+    async def test_failed_result_delivery_preserves_action_cards_for_retry(self):
+        self.bot.edit_message_text.side_effect=TimedOut()
+        update=self.update()
+        update.effective_message.reply_text.side_effect=TimedOut()
+        with self.assertRaises(TimedOut):
+            await ui.result(update,self.context,'Confirmed',key='confirm:42',retire_refs=([10,5],))
+        self.bot.delete_message.assert_not_awaited()
+
     async def test_deleted_screen_falls_back_to_new_message(self):
         self.context.user_data['_ui_screen']=[10,5]
         self.bot.edit_message_text.side_effect=BadRequest('Message to edit not found')
