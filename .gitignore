@@ -10,3 +10,6 @@ secrets/
 .venv/
 __pycache__/
 *.pyc
+
+# Standalone website workspace; maintained outside the Telegram bot repository.
+/website/
