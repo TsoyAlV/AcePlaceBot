@@ -39,6 +39,13 @@ def policy_text(policy,lang):
     hours=policy['refund_cutoff_hours']
     amount=policy['deposit_amount']
     unit=policy['unit']
+    if lang=='en':
+        if not policy.get('deposit_refundable_before_cutoff',True):
+            return (f'Cancellation terms: the deposit received, up to {amount} {unit}, is non-refundable regardless of when you cancel. '
+                    'The remaining confirmed payment is refundable. The administrator processes refunds manually.')
+        return (f'Cancellation terms: cancel at least {hours} hours before the start for a refund of all confirmed payments. '
+                f'With less than {hours} hours remaining, the deposit received, up to {amount} {unit}, is retained; the remaining payment is refundable. '
+                'The administrator processes refunds manually.')
     if not policy.get('deposit_refundable_before_cutoff',True):
         if lang=='ko':
             return (f'취소 규정: 취소 시점과 관계없이 수령한 예약금 중 최대 {amount} {unit}은 환불되지 않습니다. '
@@ -55,6 +62,10 @@ def policy_text(policy,lang):
 
 
 def quote_text(quote,lang):
+    if lang=='en':
+        return (f"Confirmed payment: {quote['paid_amount']} {quote['unit']}\n"
+                f"Deposit retained: {quote['withheld_amount']} {quote['unit']}\n"
+                f"Manual refund due: {quote['refund_amount']} {quote['unit']}")
     if lang=='ko':
         return (f"확인된 결제: {quote['paid_amount']} {quote['unit']}\n"
             f"공제 선입금: {quote['withheld_amount']} {quote['unit']}\n"
@@ -73,9 +84,14 @@ def cancellation_text(row,lang):
     labels={'pending':('Ожидается ручной возврат.','관리자의 수동 환불을 기다리는 중입니다.'),
         'completed':('Администратор подтвердил выполнение возврата.','관리자가 환불 완료를 확인했습니다.'),
         'not_due':('По учтённым платежам возврат не требуется.','확인된 결제 내역 기준 환불 대상 금액이 없습니다.')}
-    text+='\n'+labels[data['refund_status']][lang=='ko']
+    english={'pending':'Awaiting manual refund.',
+             'completed':'The administrator has confirmed the refund.',
+             'not_due':'No refund is due based on the recorded payments.'}
+    text+='\n'+(english[data['refund_status']] if lang=='en' else labels[data['refund_status']][lang=='ko'])
     receipt=row.get('payment_receipt') or {}
     if receipt.get('review_status')=='pending':
+        if lang=='en':
+            return text+'\nThe payment image has not been reviewed yet. Contact the administrator about any unrecorded transfer.'
         text+='\n'+('결제 증빙이 아직 검토 중입니다. 미확인 송금은 관리자에게 문의하세요.' if lang=='ko' else
             'Скриншот ещё не проверен. Неучтённый перевод необходимо согласовать с администратором.')
     return text

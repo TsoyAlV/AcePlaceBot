@@ -28,6 +28,9 @@ WELCOME = {
     "ko": "Ace Place 파티룸 예약입니다.\n"
     "언어를 선택해 주세요. /get_user_id 명령으로 Telegram ID를 확인할 수 있습니다.\n"
     "언제든 /cancel 로 현재 작업을 중단하고 메인 메뉴로 돌아갈 수 있습니다.",
+    "en": "Ace Place — party room bookings.\n"
+    "Choose your language. Use /get_user_id to see your Telegram ID.\n"
+    "Use /cancel at any time to stop the current operation and return to the main menu.",
 }
 
 
@@ -44,6 +47,8 @@ async def current_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return client,admin_role(connection,user.id)
     client,role=await asyncio.to_thread(save)
+    if getattr(context,'user_data',None) is not None:
+        context.user_data['_language']=client.language
     await command_menu.sync_profile(context,chat.id,client.language,role)
     return client
 
@@ -52,6 +57,7 @@ def language_keyboard(lang='ru') -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(list(client_ui.menu(lang).inline_keyboard)+[[
         InlineKeyboardButton("Русский", callback_data="language:ru"),
         InlineKeyboardButton("한국어", callback_data="language:ko"),
+        InlineKeyboardButton("English", callback_data="language:en"),
     ]])
 
 
@@ -62,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cancelled
                 context.user_data.pop(key,None)
         client = await current_client(update, context)
         notice=client_ui.tr(client.language,'Операция прервана. Главное меню.\n\n',
-            '작업을 중단했습니다. 메인 메뉴입니다.\n\n') if cancelled else ''
+            '작업을 중단했습니다. 메인 메뉴입니다.\n\n', 'Operation stopped. Main menu.\n\n') if cancelled else ''
         await ui.screen(update,context,
             notice+WELCOME[client.language], reply_markup=language_keyboard(client.language)
         )
@@ -70,7 +76,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cancelled
 
 async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if query is None or query.data not in ("language:ru", "language:ko"):
+    if query is None or query.data not in ("language:ru", "language:ko", "language:en"):
         return
     if not update.effective_chat or update.effective_chat.type != 'private':
         await query.answer()
@@ -84,6 +90,8 @@ async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             set_language(connection, client.telegram_user_id, selected)
             return admin_role(connection,client.telegram_user_id)
     role=await asyncio.to_thread(save)
+    if getattr(context,'user_data',None) is not None:
+        context.user_data['_language']=selected
     await command_menu.sync_profile(context,getattr(update.effective_chat,'id',None),selected,role)
     if query.message and query.message.text == WELCOME[selected]:
         return
@@ -112,12 +120,14 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         context.user_data.pop('receipt_upload',None)
         context.user_data.pop('staff_draft',None)
     if role is None:
-        text = 'Доступ запрещён.' if client.language == 'ru' else '접근 권한이 없습니다.'
+        text = client_ui.tr(client.language,'Доступ запрещён.','접근 권한이 없습니다.','Access denied.')
     else:
         text = (
             f'Административное меню Ace Place\nРоль: {role}\n'
             'Выбери действие ниже.'
             if client.language == 'ru' else
+            f'Ace Place administration\nRole: {role}\nChoose an action below.'
+            if client.language == 'en' else
             f'Ace Place 관리자 메뉴\n역할: {role}\n'
             '아래에서 작업을 선택하세요.'
         )
@@ -125,8 +135,8 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await ui.screen(update,context,text, reply_markup=admin_ui.menu(client.language,owner=role=='owner'))
     elif role == 'operator':
         await ui.screen(update,context,text + '\n' + (
-            'Управление бронированиями доступно владельцу и администратору.' if client.language == 'ru'
-            else '예약 관리는 소유자와 관리자만 이용할 수 있습니다.'
+            client_ui.tr(client.language,'Управление бронированиями доступно владельцу и администратору.',
+            '예약 관리는 소유자와 관리자만 이용할 수 있습니다.','Booking management is available to the owner and administrators.')
         ))
     else:
         await ui.error(update,context,text)
@@ -212,7 +222,7 @@ def main() -> int:
         application.add_handler(CommandHandler("admin", admin_menu, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler("book", book_command, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler("cancel", cancel_command, filters=filters.ChatType.PRIVATE))
-        application.add_handler(CallbackQueryHandler(select_language, pattern=r"^language:(ru|ko)$"))
+        application.add_handler(CallbackQueryHandler(select_language, pattern=r"^language:(ru|ko|en)$"))
         application.add_handler(CallbackQueryHandler(admin_ui.callback, pattern=r"^adm:"))
         application.add_handler(CallbackQueryHandler(staff_ui.callback, pattern=r"^staff:"))
         application.add_handler(CallbackQueryHandler(client_ui.callback, pattern=r"^cli:"))

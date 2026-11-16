@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 
 def render(config,lang):
-    content=config.ko if lang=='ko' else config.ru
+    content=getattr(config,lang if lang in ('ru','ko','en') else 'ru')
     link=f'<a href="{escape(config.url,quote=True)}"><b>{escape(content.link_text)}</b></a>'
     return escape(content.message).replace('{review_link}',link)
 

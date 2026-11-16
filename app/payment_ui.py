@@ -14,20 +14,20 @@ def admin_controls(row,lang):
     if not receipt:
         return []
     bid,version=row['booking_id'],row['version']
-    buttons=[[Button(admin_ui.tr(lang,'Посмотреть скриншот','입금 이미지 보기'),callback_data=f'pay:view:{bid}')]]
+    buttons=[[Button(admin_ui.tr(lang,'Посмотреть скриншот','입금 이미지 보기', 'View payment image'),callback_data=f'pay:view:{bid}')]]
     if receipt['review_status']=='pending':
         if row['status']=='confirmed' or (row['status']=='pending' and row['expires_at']>datetime.now(timezone.utc)):
-            buttons.append([Button(admin_ui.tr(lang,'Предоплата получена','선입금 확인'),callback_data=f'pay:ask:accept:{bid}:{version}')])
-        buttons.append([Button(admin_ui.tr(lang,'Запросить другой скриншот','다른 이미지 요청'),callback_data=f'pay:ask:reject:{bid}:{version}')])
+            buttons.append([Button(admin_ui.tr(lang,'Предоплата получена','선입금 확인', 'Deposit received'),callback_data=f'pay:ask:accept:{bid}:{version}')])
+        buttons.append([Button(admin_ui.tr(lang,'Запросить другой скриншот','다른 이미지 요청', 'Request another payment image'),callback_data=f'pay:ask:reject:{bid}:{version}')])
     return buttons
 
 
 def receipt_caption(row,lang):
     receipt=row['payment_receipt']
-    text=admin_ui.tr(lang,'Скриншот НЕ подтверждает поступление денег. Проверь банк.\n','이미지는 입금을 보장하지 않습니다. 은행에서 확인하세요.\n')
-    text+=admin_ui.tr(lang,'Ожидаемая предоплата: ','예상 선입금: ')+f"{receipt['expected_amount']} {receipt['unit']}\n"
+    text=admin_ui.tr(lang,'Скриншот НЕ подтверждает поступление денег. Проверь банк.\n','이미지는 입금을 보장하지 않습니다. 은행에서 확인하세요.\n', 'A payment image does NOT prove receipt of money. Check your bank account.\n')
+    text+=admin_ui.tr(lang,'Ожидаемая предоплата: ','예상 선입금: ', 'Expected deposit: ')+f"{receipt['expected_amount']} {receipt['unit']}\n"
     if receipt.get('late') or row['status'] in ('expired','cancelled') or (row['status']=='pending' and row['expires_at']<=datetime.now(timezone.utc)):
-        text+=admin_ui.tr(lang,'ВНИМАНИЕ: поздняя оплата / заявка не действует. Не восстанавливай бронь без проверки доступности.\n','주의: 지연 결제 또는 만료/취소 신청입니다. 예약 가능 여부를 다시 확인해야 합니다.\n')
+        text+=admin_ui.tr(lang,'ВНИМАНИЕ: поздняя оплата / заявка не действует. Не восстанавливай бронь без проверки доступности.\n','주의: 지연 결제 또는 만료/취소 신청입니다. 예약 가능 여부를 다시 확인해야 합니다.\n', 'WARNING: late payment / inactive request. Do not restore the booking without checking availability.\n')
     text+=admin_ui.card(row,lang)
     return text
 
@@ -35,7 +35,7 @@ def receipt_caption(row,lang):
 async def send_receipt(bot,chat_id,row,lang):
     receipt=row['payment_receipt']
     buttons=admin_controls(row,lang)
-    buttons.append([Button(admin_ui.tr(lang,'Открыть бронь','예약 열기'),callback_data=f"adm:view:{row['booking_id']}")])
+    buttons.append([Button(admin_ui.tr(lang,'Открыть бронь','예약 열기', 'Open booking'),callback_data=f"adm:view:{row['booking_id']}")])
     kwargs=dict(chat_id=chat_id,caption=receipt_caption(row,lang),reply_markup=Markup(buttons))
     if receipt['media_type']=='photo':
         await bot.send_photo(photo=receipt['file_id'],**kwargs)
@@ -62,7 +62,7 @@ async def callback(update,context):
             context.user_data['receipt_upload']=row['booking_id']
             await ui.screen(update,context,admin_ui.tr(lang,
                 f"Отправь один скриншот для брони #{row['booking_id']} как фото или PNG/JPEG/WebP-файл до 10 МБ. /cancel — прервать. Загрузка не подтверждает оплату.",
-                f"예약 #{row['booking_id']}의 사진 또는 PNG/JPEG/WebP 파일을 보내세요 (10MB 이하). /cancel 로 중단. 업로드는 입금 확인이 아닙니다."))
+                f"예약 #{row['booking_id']}의 사진 또는 PNG/JPEG/WebP 파일을 보내세요 (10MB 이하). /cancel 로 중단. 업로드는 입금 확인이 아닙니다.", f"Send one payment image for booking #{row['booking_id']} as a photo or PNG/JPEG/WebP file up to 10 MB. /cancel to stop. Uploading does not confirm payment."))
         elif action=='view':
             row,lang=await admin_ui.call(update,context,lambda c,a,l:(get_booking(c,a,int(parts[2])),l))
             if not row.get('payment_receipt'):
@@ -78,8 +78,8 @@ async def callback(update,context):
                     raise BookingError('Booking changed')
                 text=admin_ui.tr(lang,
                     'Подтверждаешь фактическое поступление указанной предоплаты в банке? Бронь будет подтверждаться отдельно.' if choice=='accept' else 'Запросить другой скриншот? Сумма оплаты не изменится.',
-                    '은행에서 실제 선입금을 확인했습니까? 예약 승인은 별도입니다.' if choice=='accept' else '다른 이미지를 요청하시겠습니까? 결제 금액은 변경되지 않습니다.')
-                await ui.screen(update,context,text,reply_markup=Markup([[Button(admin_ui.tr(lang,'Да','네'),callback_data=f'pay:yes:{choice}:{bid}:{version}')]]))
+                    '은행에서 실제 선입금을 확인했습니까? 예약 승인은 별도입니다.' if choice=='accept' else '다른 이미지를 요청하시겠습니까? 결제 금액은 변경되지 않습니다.', 'Confirm that the deposit has actually reached your bank account? Booking approval is separate.' if choice=='accept' else 'Request another payment image? The recorded payment amount will not change.')
+                await ui.screen(update,context,text,reply_markup=Markup([[Button(admin_ui.tr(lang,'Да','네', 'Yes'),callback_data=f'pay:yes:{choice}:{bid}:{version}')]]))
                 return
             row=await admin_ui.call(update,context,lambda c,a,l:review_receipt(c,a,bid,expected_version=version,accept=choice=='accept'))
             from app.notifications import wake_delivery
@@ -113,7 +113,7 @@ async def media_input(update,context):
         context.user_data.pop('receipt_upload',None)
         from app.notifications import wake_delivery
         wake_delivery(context)
-        await ui.result(update,context,admin_ui.tr(lang,'Скриншот отправлен на проверку. Оплата и бронь пока не подтверждены автоматически.','이미지를 검토 요청했습니다. 결제와 예약은 자동 확정되지 않습니다.'),reply_markup=client_ui.controls(row,lang))
+        await ui.result(update,context,admin_ui.tr(lang,'Скриншот отправлен на проверку. Оплата и бронь пока не подтверждены автоматически.','이미지를 검토 요청했습니다. 결제와 예약은 자동 확정되지 않습니다.', 'Payment image sent for review. Payment and booking are not confirmed automatically.'),reply_markup=client_ui.controls(row,lang))
     except (BookingError,ValueError) as error:
         await error_message(update,error,context)
 

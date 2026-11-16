@@ -22,8 +22,8 @@ from app import booking_details
 
 
 def menu(lang):
-    return Markup([[Button(tr(lang,'Забронировать','예약하기'),callback_data='cli:new'),
-        Button(tr(lang,'Мои брони','내 예약'),callback_data='cli:mine:0')]])
+    return Markup([[Button(tr(lang,'Забронировать','예약하기', 'Book now'),callback_data='cli:new'),
+        Button(tr(lang,'Мои брони','내 예약', 'My bookings'),callback_data='cli:mine:0')]])
 
 
 async def call(update,context,operation):
@@ -34,6 +34,8 @@ async def call(update,context,operation):
         with connect_database(context.bot_data['settings']) as c:
             client=register_client(c,telegram_user_id=user.id,telegram_chat_id=chat.id,
                 name=user.full_name,username=user.username,language_code=user.language_code)
+            if getattr(context,'user_data',None) is not None:
+                context.user_data['_language']=client.language
             return operation(c,user.id,client)
     return await asyncio.to_thread(execute)
 
@@ -47,23 +49,23 @@ def own_booking(c,actor,bid):
 
 
 def card(row,lang):
-    statuses={'pending':tr(lang,'Ожидает подтверждения','승인 대기'),'confirmed':tr(lang,'Подтверждено','확정'),
-        'cancelled':tr(lang,'Отменено','취소'),'expired':tr(lang,'Срок истёк','만료'),
-        'hold':tr(lang,'Удержание','임시 보류'),'completed':tr(lang,'Завершено','완료')}
+    statuses={'pending':tr(lang,'Ожидает подтверждения','승인 대기', 'Awaiting approval'),'confirmed':tr(lang,'Подтверждено','확정', 'Confirmed'),
+        'cancelled':tr(lang,'Отменено','취소', 'Cancelled'),'expired':tr(lang,'Срок истёк','만료', 'Expired'),
+        'hold':tr(lang,'Удержание','임시 보류', 'On hold'),'completed':tr(lang,'Завершено','완료', 'Completed')}
     status=row['status']
     if status in ('pending','hold') and row['expires_at']<=datetime.now(SEOUL):
         status='expired'
     text=f"Ace Place · #{row['booking_id']}\n{statuses[status]}\n{fmt(row['starts_at'])} → {fmt(row['ends_at'])}\nAsia/Seoul\n{row['amount']} {row['unit']}"
-    text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ')+f"{row['deposit_paid_amount']} {row['unit']}"
+    text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ', 'Deposit received: ')+f"{row['deposit_paid_amount']} {row['unit']}"
     answers=booking_details.text(row,lang)
     if answers:
         text+='\n'+answers
     receipt=row.get('payment_receipt')
     if receipt:
-        labels={'pending':tr(lang,'Скриншот на проверке','이미지 검토 중'),'accepted':tr(lang,'Предоплата проверена','선입금 확인됨'),'rejected':tr(lang,'Нужен другой скриншот','다른 이미지가 필요합니다')}
+        labels={'pending':tr(lang,'Скриншот на проверке','이미지 검토 중', 'Payment image under review'),'accepted':tr(lang,'Предоплата проверена','선입금 확인됨', 'Deposit verified'),'rejected':tr(lang,'Нужен другой скриншот','다른 이미지가 필요합니다', 'Another payment image is needed')}
         text+='\n'+labels[receipt['review_status']]
     if status in ('pending','hold'):
-        text+='\n'+tr(lang,'Ответ ожидается до: ','승인 대기 기한: ')+fmt(row['expires_at'])
+        text+='\n'+tr(lang,'Ответ ожидается до: ','승인 대기 기한: ', 'Response due by: ')+fmt(row['expires_at'])
     if row['type']=='booking':
         text+='\n\n'+policy_text(policy_for(row),lang)
     details=cancellation_text(row,lang)
@@ -73,15 +75,15 @@ def card(row,lang):
 
 
 def controls(row,lang):
-    buttons=[[Button(tr(lang,'Обновить статус','상태 새로고침'),callback_data=f"cli:view:{row['booking_id']}")]]
+    buttons=[[Button(tr(lang,'Обновить статус','상태 새로고침', 'Refresh status'),callback_data=f"cli:view:{row['booking_id']}")]]
     receipt=row.get('payment_receipt')
     if row['status'] in ('pending','confirmed','expired','cancelled') and row['deposit_paid_amount']==0 and (not receipt or receipt['review_status']=='rejected'):
-        buttons.append([Button(tr(lang,'Отправить подтверждение оплаты','결제 증빙 보내기'),callback_data=f"pay:upload:{row['booking_id']}")])
+        buttons.append([Button(tr(lang,'Отправить подтверждение оплаты','결제 증빙 보내기', 'Send payment evidence'),callback_data=f"pay:upload:{row['booking_id']}")])
     paid=row['deposit_paid_amount']+row['balance_paid_amount']
     if row['type']=='booking' and row['starts_at']>datetime.now(SEOUL) and (row['status']=='confirmed' or (row['status'] in ('hold','pending') and paid>0 and row['expires_at']>datetime.now(SEOUL))):
-        buttons.append([Button(tr(lang,'Отменить бронь','예약 취소'),callback_data=f"cli:cancel:{row['booking_id']}:{row['version']}")])
+        buttons.append([Button(tr(lang,'Отменить бронь','예약 취소', 'Cancel booking'),callback_data=f"cli:cancel:{row['booking_id']}:{row['version']}")])
     elif row['status'] in ('pending','hold') and row['expires_at']>datetime.now(SEOUL):
-        buttons.append([Button(tr(lang,'Отозвать заявку','신청 철회'),callback_data=f"cli:withdraw:{row['booking_id']}:{row['version']}")])
+        buttons.append([Button(tr(lang,'Отозвать заявку','신청 철회', 'Withdraw request'),callback_data=f"cli:withdraw:{row['booking_id']}:{row['version']}")])
     return Markup(buttons)
 
 
@@ -99,7 +101,7 @@ async def show_starts(update,context,lang,page=0):
         nav.append(Button('→',callback_data=f"cli:page:{data['token']}:{page+1}"))
     if nav:
         buttons.append(nav)
-    await ui.screen(update,context,tr(lang,'Выбери время начала (Сеул). До отправки заявки время не резервируется.','시작 시간을 선택하세요 (서울). 신청 전에는 시간이 확보되지 않습니다.'),reply_markup=Markup(buttons))
+    await ui.screen(update,context,tr(lang,'Выбери время начала (Сеул). До отправки заявки время не резервируется.','시작 시간을 선택하세요 (서울). 신청 전에는 시간이 확보되지 않습니다.', 'Choose a start time (Seoul). The time is not reserved until you submit your request.'),reply_markup=Markup(buttons))
 
 
 async def show_review(update,context,data,lang):
@@ -110,27 +112,27 @@ async def show_review(update,context,data,lang):
     data['payment']=(payment.bank,payment.account_number,payment.account_holder)
     data['cancellation_policy']=current_policy(load_business_config())
     text=(f"Ace Place\n{fmt(data['start'])} → {fmt(data['end'])}\nAsia/Seoul\n"
-          +tr(lang,'Полная стоимость: ','총금액: ')+f"{quote['amount']} {quote['unit']}\n"
-          +tr(lang,'Предоплата: ','선입금: ')+f'{payment.deposit_amount} KRW\n'
+          +tr(lang,'Полная стоимость: ','총금액: ', 'Total price: ')+f"{quote['amount']} {quote['unit']}\n"
+          +tr(lang,'Предоплата: ','선입금: ', 'Deposit: ')+f'{payment.deposit_amount} KRW\n'
           +f'{payment.bank}\n{payment.account_number}\n{payment.account_holder}\n'
-          +tr(lang,'Предоплата входит в полную стоимость. После отправки дождись подтверждения администратора. Перевод сам по себе не подтверждает бронь.','선입금은 총금액에 포함됩니다. 신청 후 관리자 승인을 기다려 주세요. 송금만으로 예약이 확정되지 않습니다.'))
+          +tr(lang,'Предоплата входит в полную стоимость. После отправки дождись подтверждения администратора. Перевод сам по себе не подтверждает бронь.','선입금은 총금액에 포함됩니다. 신청 후 관리자 승인을 기다려 주세요. 송금만으로 예약이 확정되지 않습니다.', 'The deposit is part of the total price. After submitting, wait for administrator approval. A bank transfer alone does not confirm the booking.'))
     text+='\n\n'+booking_details.text(data['details'],lang)+'\n\n'+policy_text(data['cancellation_policy'],lang)
     data['step']='review'
     await ui.screen(update,context,text,reply_markup=Markup([
-        [Button(tr(lang,'Отправить заявку','예약 신청'),callback_data='cli:send:'+data['token'])],
-        [Button(tr(lang,'Изменить ответы','답변 수정'),callback_data='cli:edit:'+data['token'])],
-        [Button(tr(lang,'Прервать','중단'),callback_data='cli:abort:'+data['token'])]]))
+        [Button(tr(lang,'Отправить заявку','예약 신청', 'Submit request'),callback_data='cli:send:'+data['token'])],
+        [Button(tr(lang,'Изменить ответы','답변 수정', 'Edit answers'),callback_data='cli:edit:'+data['token'])],
+        [Button(tr(lang,'Прервать','중단', 'Stop'),callback_data='cli:abort:'+data['token'])]]))
 
 
 async def show_question(update,context,data,lang,step='phone'):
     data['step']=step
     texts={
-        'phone':tr(lang,'Чтобы оформить бронь, ответьте на 3 коротких вопроса.\n\n1/3. Укажите свой телефон для связи. Можно отправить контакт кнопкой ниже или ввести номер вручную.','예약을 위해 세 가지 질문에 답해 주세요.\n\n1/3. 연락 가능한 본인의 전화번호를 알려 주세요. 아래 버튼으로 연락처를 보내거나 직접 입력하세요.'),
-        'guests':tr(lang,'2/3. Сколько гостей планируется? Введите число, например: 20.','2/3. 몇 명이 참석하나요? 숫자로 입력하세요. 예: 20.'),
-        'event':tr(lang,'3/3. Какое мероприятие планируете? Например: день рождения, встреча друзей или мастер-класс.','3/3. 어떤 행사를 계획하고 계신가요? 예: 생일 파티, 친구 모임, 워크숍.'),
+        'phone':tr(lang,'Чтобы оформить бронь, ответьте на 3 коротких вопроса.\n\n1/3. Укажите свой телефон для связи. Можно отправить контакт кнопкой ниже или ввести номер вручную.','예약을 위해 세 가지 질문에 답해 주세요.\n\n1/3. 연락 가능한 본인의 전화번호를 알려 주세요. 아래 버튼으로 연락처를 보내거나 직접 입력하세요.', 'Please answer 3 short questions to book.\n\n1/3. What is your contact phone number? Use the button below to share your own contact, or type the number.'),
+        'guests':tr(lang,'2/3. Сколько гостей планируется? Введите число, например: 20.','2/3. 몇 명이 참석하나요? 숫자로 입력하세요. 예: 20.', '2/3. How many guests are you expecting? Enter a number, for example: 20.'),
+        'event':tr(lang,'3/3. Какое мероприятие планируете? Например: день рождения, встреча друзей или мастер-класс.','3/3. 어떤 행사를 계획하고 계신가요? 예: 생일 파티, 친구 모임, 워크숍.', '3/3. What event are you planning? For example: a birthday, a gathering with friends or a workshop.'),
     }
-    markup=ReplyKeyboardMarkup([[KeyboardButton(tr(lang,'Поделиться контактом','연락처 공유'),request_contact=True)]],resize_keyboard=True,one_time_keyboard=True) if step=='phone' else None
-    await ui.screen(update,context,texts[step]+'\n/cancel — '+tr(lang,'прервать','중단'),reply_markup=markup)
+    markup=ReplyKeyboardMarkup([[KeyboardButton(tr(lang,'Поделиться контактом','연락처 공유', 'Share my contact'),request_contact=True)]],resize_keyboard=True,one_time_keyboard=True) if step=='phone' else None
+    await ui.screen(update,context,texts[step]+'\n/cancel — '+tr(lang,'прервать','중단', 'stop'),reply_markup=markup)
 
 
 async def show_dates(update,context,lang,month=None,text=None):
@@ -141,20 +143,20 @@ async def show_dates(update,context,lang,month=None,text=None):
         raise BookingError('Past date')
     await ui.screen(update,context,text or tr(lang,
         'Выбери дату в календаре или введи YYYY-MM-DD. Время Сеула. × — прошедшие даты. /cancel — прервать.',
-        '달력에서 날짜를 선택하거나 YYYY-MM-DD 형식으로 입력하세요. 서울 시간 기준. ×는 지난 날짜입니다. /cancel 로 중단.'),
+        '달력에서 날짜를 선택하거나 YYYY-MM-DD 형식으로 입력하세요. 서울 시간 기준. ×는 지난 날짜입니다. /cancel 로 중단.', 'Choose a date in the calendar or enter YYYY-MM-DD. Seoul time. × marks past dates. /cancel to stop.'),
         reply_markup=month_keyboard('cli:cal:'+data['token'],month,today,lang))
 
 
 async def show_cancellation(update,context,row,quote,lang,changed=False):
     token=uuid4().hex[:12]
     context.user_data['client_cancel']=dict(token=token,booking_id=row['booking_id'],version=row['version'],quote=quote)
-    text=(tr(lang,'Условия изменились — проверь расчёт и подтверди заново.\n','조건이 변경되었습니다. 확인 후 다시 승인해 주세요.\n') if changed else '')
-    text+=card(row,lang)+'\n\n'+quote_text(quote,lang)+'\n'+tr(lang,'Отменить бронь и освободить время?','예약을 취소하고 시간을 비우시겠습니까?')
+    text=(tr(lang,'Условия изменились — проверь расчёт и подтверди заново.\n','조건이 변경되었습니다. 확인 후 다시 승인해 주세요.\n', 'The terms have changed. Review the calculation and confirm again.\n') if changed else '')
+    text+=card(row,lang)+'\n\n'+quote_text(quote,lang)+'\n'+tr(lang,'Отменить бронь и освободить время?','예약을 취소하고 시간을 비우시겠습니까?', 'Cancel this booking and release the time slot?')
     if (row.get('payment_receipt') or {}).get('review_status')=='pending':
-        text+='\n'+tr(lang,'Скриншот ещё не проверен: неучтённую оплату согласуй с администратором.','증빙이 아직 검토 중입니다. 미확인 결제는 관리자에게 문의하세요.')
+        text+='\n'+tr(lang,'Скриншот ещё не проверен: неучтённую оплату согласуй с администратором.','증빙이 아직 검토 중입니다. 미확인 결제는 관리자에게 문의하세요.', 'The payment image has not been reviewed yet. Contact the administrator about any unrecorded payment.')
     await ui.screen(update,context,text,reply_markup=Markup([
-        [Button(tr(lang,'Да, отменить бронь','예약 취소 확인'),callback_data='cli:cancel_yes:'+token)],
-        [Button(tr(lang,'Сохранить бронь','예약 유지'),callback_data=f"cli:view:{row['booking_id']}")]]))
+        [Button(tr(lang,'Да, отменить бронь','예약 취소 확인', 'Yes, cancel booking'),callback_data='cli:cancel_yes:'+token)],
+        [Button(tr(lang,'Сохранить бронь','예약 유지', 'Keep booking'),callback_data=f"cli:view:{row['booking_id']}")]]))
 
 
 async def callback(update,context):
@@ -198,7 +200,7 @@ async def callback(update,context):
                 buttons.append([Button('←',callback_data=f'cli:mine:{page-1}')])
             if len(rows)>8:
                 buttons.append([Button('→',callback_data=f'cli:mine:{page+1}')])
-            await ui.screen(update,context,tr(lang,'Мои брони','내 예약') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.'),reply_markup=Markup(buttons) if buttons else menu(lang))
+            await ui.screen(update,context,tr(lang,'Мои брони','내 예약', 'My bookings') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.', 'No bookings yet.'),reply_markup=Markup(buttons) if buttons else menu(lang))
         elif command in ('cancel','cancel_yes'):
             if command=='cancel':
                 bid=int(parts[2])
@@ -227,7 +229,7 @@ async def callback(update,context):
             if command=='withdraw':
                 if row['status'] not in ('hold','pending') or row['version']!=int(parts[3]):
                     raise StaleBooking('Reload booking')
-                await ui.screen(update,context,tr(lang,'Отозвать эту заявку?','이 신청을 철회하시겠습니까?'),reply_markup=Markup([[Button(tr(lang,'Да, отозвать','네, 철회'),callback_data=f"cli:withdraw_yes:{bid}:{row['version']}")]]))
+                await ui.screen(update,context,tr(lang,'Отозвать эту заявку?','이 신청을 철회하시겠습니까?', 'Withdraw this request?'),reply_markup=Markup([[Button(tr(lang,'Да, отозвать','네, 철회', 'Yes, withdraw'),callback_data=f"cli:withdraw_yes:{bid}:{row['version']}")]]))
                 return
             if command=='withdraw_yes':
                 def withdraw(c,a,u):
@@ -248,7 +250,7 @@ async def callback(update,context):
                 raise BookingError('Draft expired')
             if command=='abort':
                 context.user_data.pop('client_draft',None)
-                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.'),reply_markup=menu(lang))
+                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.', 'Entry stopped.'),reply_markup=menu(lang))
             elif command=='edit':
                 if data['step']!='review':
                     raise BookingError('Draft expired')
@@ -285,7 +287,7 @@ async def callback(update,context):
                 else:
                     raise BookingError('Draft expired')
                 bank,account,holder=data['payment']
-                text=card(row,lang)+'\n\n'+tr(lang,'Предоплата: ','선입금: ')+f"{data['deposit']} KRW\n{bank}\n{account}\n{holder}"
+                text=card(row,lang)+'\n\n'+tr(lang,'Предоплата: ','선입금: ', 'Deposit: ')+f"{data['deposit']} KRW\n{bank}\n{account}\n{holder}"
                 await ui.result(update,context,text,reply_markup=controls(row,lang),key=f"client:create:{row['booking_id']}")
     except (BookingError,ValueError,IndexError) as error:
         await show_error(update,error,context)
@@ -301,10 +303,10 @@ async def accept_date(update,context,text,lang):
     data.update(day=day,step='hours')
     minimum=load_business_config().booking.minimum_hours
     choices=sorted({minimum,minimum+1,minimum+2,minimum+3,minimum+5,minimum+7})
-    buttons=[Button(tr(lang,f'{hours} ч',f'{hours}시간'),callback_data=f"cli:hours:{data['token']}:{hours}") for hours in choices]
+    buttons=[Button(tr(lang,f'{hours} ч',f'{hours}시간', f'{hours} h'),callback_data=f"cli:hours:{data['token']}:{hours}") for hours in choices]
     await ui.screen(update,context,tr(lang,
         f'На сколько часов нужна аренда? Минимум — {minimum} ч.\nВыбери длительность кнопкой или введи только число без «ч», например: {minimum}.',
-        f'몇 시간 동안 이용하시겠어요? 최소 {minimum}시간입니다.\n버튼으로 선택하거나 «시간» 없이 숫자만 입력하세요. 예: {minimum}.'),
+        f'몇 시간 동안 이용하시겠어요? 최소 {minimum}시간입니다.\n버튼으로 선택하거나 «시간» 없이 숫자만 입력하세요. 예: {minimum}.', f'How many hours would you like to book? Minimum: {minimum} h.\nChoose a button or enter a number without «h», for example: {minimum}.'),
         reply_markup=Markup([buttons[:3],buttons[3:]]))
 
 
@@ -318,7 +320,7 @@ async def accept_hours(update,context,hours,lang):
     result=await call(update,context,lambda c,a,u:get_availability_windows(c,a,start,start+timedelta(days=1,hours=hours),duration_hours=hours))
     options=[item for item in result['available_starts'] if datetime.fromisoformat(item['starts_at']).date()==data['day']]
     if not options:
-        message=tr(lang,'Не удалось проверить расписание. Свяжись с администратором.','일정을 확인할 수 없습니다. 관리자에게 문의하세요.') if result['warnings'] else tr(lang,'Для этой даты свободных вариантов нет. Выбери другую дату.','해당 날짜에 가능한 시간이 없습니다. 다른 날짜를 선택하세요.')
+        message=tr(lang,'Не удалось проверить расписание. Свяжись с администратором.','일정을 확인할 수 없습니다. 관리자에게 문의하세요.', 'Unable to check availability. Contact the administrator.') if result['warnings'] else tr(lang,'Для этой даты свободных вариантов нет. Выбери другую дату.','해당 날짜에 가능한 시간이 없습니다. 다른 날짜를 선택하세요.', 'No available times on this date. Choose another date.')
         data['step']='date'
         await show_dates(update,context,lang,month=data['day'].replace(day=1),text=message)
     else:

@@ -23,6 +23,7 @@ class UsersDatabaseTests(unittest.TestCase):
         self.connection.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
         self.connection.execute(sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema)))
         self.connection.execute((PROJECT_ROOT / 'migrations/001_initial.sql').read_text(encoding='utf-8'))
+        self.connection.execute((PROJECT_ROOT / 'migrations/014_english_language.sql').read_text(encoding='utf-8'))
 
     def register(self, telegram_id=101, **changes):
         values = dict(telegram_user_id=telegram_id, telegram_chat_id=telegram_id,
@@ -44,9 +45,19 @@ class UsersDatabaseTests(unittest.TestCase):
 
     def test_initial_language_and_validation(self):
         self.assertEqual(self.register(language_code='ko-KR').language, 'ko')
-        self.assertEqual(self.register(102, language_code='en').language, 'ru')
+        self.assertEqual(self.register(102, language_code='en-US').language, 'en')
+        set_language(self.connection,102,'en')
+        self.assertEqual(self.register(102,language_code='ko').language,'en')
         with self.assertRaises(ValueError):
-            set_language(self.connection, 101, 'en')
+            set_language(self.connection, 101, 'fr')
+
+    def test_language_migration_is_repeatable_and_preserves_existing_choices(self):
+        self.register()
+        self.register(102,language_code='ko')
+        self.connection.execute((PROJECT_ROOT / 'migrations/014_english_language.sql').read_text(encoding='utf-8'))
+        self.assertEqual(self.register().language,'ru')
+        self.assertEqual(self.register(102).language,'ko')
+        self.assertEqual(self.register(103,language_code='en').language,'en')
 
     def test_normal_client_has_no_access(self):
         self.register(name='owner', username='admin')

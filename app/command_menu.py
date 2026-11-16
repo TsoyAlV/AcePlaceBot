@@ -7,22 +7,22 @@ from telegram import BotCommand,BotCommandScopeAllPrivateChats,BotCommandScopeCh
 from telegram.error import TelegramError
 
 from app.database import connect_database
+from app.admin_ui import tr
 
 logger=logging.getLogger(__name__)
 
 
 def commands(lang='ru',role=None):
-    ru=(lang!='ko')
     values=[
-        ('start','Главное меню' if ru else '메인 메뉴'),
-        ('book','Забронировать' if ru else '예약하기'),
-        ('help','Помощь' if ru else '도움말'),
-        ('get_user_id','Мой Telegram ID' if ru else '내 Telegram ID'),
-        ('language','Выбрать язык' if ru else '언어 선택'),
-        ('cancel','Прервать и в главное меню' if ru else '작업 중단 · 메인 메뉴'),
+        ('start',tr(lang,'Главное меню','메인 메뉴','Main menu')),
+        ('book',tr(lang,'Забронировать','예약하기','Book now')),
+        ('help',tr(lang,'Помощь','도움말','Help')),
+        ('get_user_id',tr(lang,'Мой Telegram ID','내 Telegram ID','My Telegram ID')),
+        ('language',tr(lang,'Выбрать язык','언어 선택','Choose language')),
+        ('cancel',tr(lang,'Прервать и в главное меню','작업 중단 · 메인 메뉴','Stop and return to main menu')),
     ]
     if role in ('owner','admin'):
-        values.append(('admin','Управление бронированиями' if ru else '예약 관리'))
+        values.append(('admin',tr(lang,'Управление бронированиями','예약 관리','Manage bookings')))
     return [BotCommand(name,description) for name,description in values]
 
 
@@ -35,7 +35,7 @@ async def sync_profile(context,chat_id,lang,role):
         return
     try:
         # Explicit variants prevent an old language-specific scope from overriding the user's chosen language.
-        for language_code in ('','ru','ko'):
+        for language_code in ('','ru','ko','en'):
             await context.bot.set_my_commands(commands(lang,role),scope=BotCommandScopeChat(chat_id),language_code=language_code)
         await context.bot.set_chat_menu_button(chat_id=chat_id,menu_button=MenuButtonCommands())
         cache[chat_id]=signature
@@ -66,8 +66,8 @@ async def refresh_user(context,telegram_id):
 
 async def reconcile(application):
     if not application.bot_data.get('command_menu_defaults'):
-        for language_code in ('','ru','ko'):
-            await application.bot.set_my_commands(commands('ko' if language_code=='ko' else 'ru'),
+        for language_code in ('','ru','ko','en'):
+            await application.bot.set_my_commands(commands(language_code or 'ru'),
                 scope=BotCommandScopeAllPrivateChats(),language_code=language_code)
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         application.bot_data['command_menu_defaults']=True

@@ -63,6 +63,21 @@ class ChangeNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('https://example.com/route',message['text'])
         self.assertIn('Test entry instructions',message['text'])
 
+    async def test_english_choice_survives_registration_and_confirm_delivers_english_instructions(self):
+        from app.users import set_language,register_client
+        with self.connection(self.settings) as c:
+            set_language(c,102,'en')
+            user=register_client(c,telegram_user_id=102,telegram_chat_id=102,name='Test',username=None,language_code='ru')
+            self.assertEqual(user.language,'en')
+        self.change(self.create(),'confirm')
+        bot=await self.deliver()
+        message=bot.send_message.call_args.kwargs
+        self.assertEqual(message['chat_id'],102)
+        self.assertIn('Booking confirmed',message['text'])
+        self.assertIn('Map and directions: https://kko.to/Hn6onZrkRD',message['text'])
+        self.assertIn('turn right',message['text'])
+        self.assertNotIn('Бронь подтверждена',message['text'])
+
     async def test_cleaning_reminder_survives_restart_and_sends_once(self):
         self.start-=timedelta(days=6)
         self.end-=timedelta(days=6)

@@ -22,21 +22,21 @@ from app import booking_details
 SEOUL = ZoneInfo('Asia/Seoul')
 
 
-def tr(lang, ru, ko):
-    return ko if lang == 'ko' else ru
+def tr(lang, ru, ko, en):
+    return {'ru':ru,'ko':ko,'en':en}.get(lang,ru)
 
 
 def menu(lang,owner=False):
     buttons=[
-        [Button(tr(lang,'Все брони','전체 예약'),callback_data='adm:list:all:0'),
-         Button(tr(lang,'Ожидают решения','승인 대기'),callback_data='adm:list:pending:0')],
-        [Button(tr(lang,'Создать заявку','예약 신청 만들기'),callback_data='adm:new:booking'),
-         Button(tr(lang,'Блокировать время','시간 차단'),callback_data='adm:new:block')],
-        [Button(tr(lang,'Блокировки','시간 차단 목록'),callback_data='adm:list:blocks:0')],
-        [Button(tr(lang,'Ожидают возврата','환불 대기'),callback_data='adm:list:refunds:0')],
+        [Button(tr(lang,'Все брони','전체 예약', 'All bookings'),callback_data='adm:list:all:0'),
+         Button(tr(lang,'Ожидают решения','승인 대기', 'Awaiting approval'),callback_data='adm:list:pending:0')],
+        [Button(tr(lang,'Создать заявку','예약 신청 만들기', 'Create request'),callback_data='adm:new:booking'),
+         Button(tr(lang,'Блокировать время','시간 차단', 'Block time'),callback_data='adm:new:block')],
+        [Button(tr(lang,'Блокировки','시간 차단 목록', 'Time blocks'),callback_data='adm:list:blocks:0')],
+        [Button(tr(lang,'Ожидают возврата','환불 대기', 'Awaiting refund'),callback_data='adm:list:refunds:0')],
     ]
     if owner:
-        buttons.append([Button(tr(lang,'Администраторы','관리자'),callback_data='staff:list:0')])
+        buttons.append([Button(tr(lang,'Администраторы','관리자', 'Administrators'),callback_data='staff:list:0')])
     return Markup(buttons)
 
 
@@ -53,30 +53,30 @@ def fmt(value):
 
 def card(row, lang):
     status = {
-        'hold':tr(lang,'Удержание','임시 보류'), 'pending':tr(lang,'Ожидает подтверждения','승인 대기'),
-        'confirmed':tr(lang,'Подтверждено','확정'), 'cancelled':tr(lang,'Отменено','취소'),
-        'expired':tr(lang,'Истекло','만료'), 'completed':tr(lang,'Завершено','완료'),
+        'hold':tr(lang,'Удержание','임시 보류', 'On hold'), 'pending':tr(lang,'Ожидает подтверждения','승인 대기', 'Awaiting approval'),
+        'confirmed':tr(lang,'Подтверждено','확정', 'Confirmed'), 'cancelled':tr(lang,'Отменено','취소', 'Cancelled'),
+        'expired':tr(lang,'Истекло','만료', 'Expired'), 'completed':tr(lang,'Завершено','완료', 'Completed'),
     }[row['status']]
-    text = (f"#{row['booking_id']} · " + tr(lang,'Блокировка','시간 차단') if row['type']=='block'
-            else f"#{row['booking_id']} · " + tr(lang,'Бронь','예약'))
+    text = (f"#{row['booking_id']} · " + tr(lang,'Блокировка','시간 차단', 'Time block') if row['type']=='block'
+            else f"#{row['booking_id']} · " + tr(lang,'Бронь','예약', 'Booking'))
     text += f"\n{status}\n{fmt(row['starts_at'])} → {fmt(row['ends_at'])}\nAsia/Seoul"
     text += f"\n{row['amount']} {row['unit']}"
-    text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ')+f"{row['deposit_paid_amount']} {row['unit']}"
+    text+='\n'+tr(lang,'Предоплата получена: ','확인된 선입금: ', 'Deposit received: ')+f"{row['deposit_paid_amount']} {row['unit']}"
     answers=booking_details.text(row,lang)
     if answers:
         text+='\n'+answers
     if row.get('cleaning_ends_at'):
-        text+='\n'+tr(lang,'Уборка: ','청소: ')+fmt(row['cleaning_starts_at'])+' → '+fmt(row['cleaning_ends_at'])
-    text += '\n' + tr(lang,'Клиент ID: ','고객 ID: ') + str(row['user_id'] or '—')
+        text+='\n'+tr(lang,'Уборка: ','청소: ', 'Cleaning: ')+fmt(row['cleaning_starts_at'])+' → '+fmt(row['cleaning_ends_at'])
+    text += '\n' + tr(lang,'Клиент ID: ','고객 ID: ', 'Customer ID: ') + str(row['user_id'] or '—')
     if row.get('expires_at'):
-        text += '\n' + tr(lang,'Срок заявки: ','신청 만료: ') + fmt(row['expires_at'])
+        text += '\n' + tr(lang,'Срок заявки: ','신청 만료: ', 'Request deadline: ') + fmt(row['expires_at'])
     sync=row.get('calendar_sync') or {}
     if sync:
         text+='\nGoogle Calendar: '+sync.get('status','pending')
         if sync.get('last_error'):
             text+=' · '+sync['last_error']
     if (row.get('request_data') or {}).get('source')=='books_plans':
-        text+='\n'+tr(lang,'Источник: books_plans; изменения через config.yaml','출처: books_plans; config.yaml에서 변경')
+        text+='\n'+tr(lang,'Источник: books_plans; изменения через config.yaml','출처: books_plans; config.yaml에서 변경', 'Source: books_plans; edit via config.yaml')
     details=cancellation_text(row,lang)
     if details:
         text+='\n\n'+details
@@ -87,24 +87,24 @@ def controls(row, lang):
     bid, version = row['booking_id'], row['version']
     buttons = []
     if (row.get('request_data') or {}).get('source')=='books_plans':
-        return Markup([[Button(tr(lang,'К списку блокировок','차단 목록'),callback_data='adm:list:blocks:0')]])
+        return Markup([[Button(tr(lang,'К списку блокировок','차단 목록', 'Back to time blocks'),callback_data='adm:list:blocks:0')]])
     from app.payment_ui import admin_controls
     buttons.extend(admin_controls(row,lang))
     if row['status']=='cancelled' and (row.get('cancellation') or {}).get('refund_status')=='pending':
-        buttons.append([Button(tr(lang,'Возврат выполнен','환불 완료'),callback_data=f'adm:ask:refund:{bid}:{version}')])
+        buttons.append([Button(tr(lang,'Возврат выполнен','환불 완료', 'Refund completed'),callback_data=f'adm:ask:refund:{bid}:{version}')])
     if row['status']=='pending':
-        buttons.append([Button(tr(lang,'Подтвердить','승인'),callback_data=f'adm:ask:confirm:{bid}:{version}')])
+        buttons.append([Button(tr(lang,'Подтвердить','승인', 'Confirm'),callback_data=f'adm:ask:confirm:{bid}:{version}')])
     if row['status']=='hold':
-        buttons.append([Button(tr(lang,'Отправить на подтверждение','승인 요청'),callback_data=f'adm:ask:submit:{bid}:{version}')])
+        buttons.append([Button(tr(lang,'Отправить на подтверждение','승인 요청', 'Submit for approval'),callback_data=f'adm:ask:submit:{bid}:{version}')])
     if row['status'] in ('pending','confirmed'):
-        buttons.append([Button(tr(lang,'Перенести','일정 변경'),callback_data=f'adm:ask:move:{bid}:{version}')])
+        buttons.append([Button(tr(lang,'Перенести','일정 변경', 'Reschedule'),callback_data=f'adm:ask:move:{bid}:{version}')])
     if row['status'] in ('hold','pending','confirmed'):
-        label=tr(lang,'Снять блокировку','시간 차단 해제') if row['type']=='block' else tr(lang,'Отменить запись','예약 취소')
+        label=tr(lang,'Снять блокировку','시간 차단 해제', 'Remove block') if row['type']=='block' else tr(lang,'Отменить запись','예약 취소', 'Cancel entry')
         buttons.append([Button(label,callback_data=f'adm:ask:cancel:{bid}:{version}')])
-    buttons.append([Button(tr(lang,'Обновить','새로고침'),callback_data=f'adm:view:{bid}')])
+    buttons.append([Button(tr(lang,'Обновить','새로고침', 'Refresh'),callback_data=f'adm:view:{bid}')])
     if row.get('calendar_sync') or row['status']=='confirmed':
-        buttons.append([Button(tr(lang,'Повторить синхронизацию Calendar','캘린더 다시 동기화'),callback_data=f'adm:calendar:{bid}')])
-    buttons.append([Button(tr(lang,'В меню администратора','관리자 메뉴'),callback_data='adm:menu')])
+        buttons.append([Button(tr(lang,'Повторить синхронизацию Calendar','캘린더 다시 동기화', 'Retry calendar sync'),callback_data=f'adm:calendar:{bid}')])
+    buttons.append([Button(tr(lang,'В меню администратора','관리자 메뉴', 'Admin menu'),callback_data='adm:menu')])
     return Markup(buttons)
 
 
@@ -118,6 +118,8 @@ async def call(update, context, operation):
             client = register_client(connection, telegram_user_id=user.id,
                 telegram_chat_id=update.effective_chat.id, name=user.full_name,
                 username=user.username, language_code=user.language_code)
+            if getattr(context,'user_data',None) is not None:
+                context.user_data['_language']=client.language
             if admin_role(connection,user.id) not in ('owner','admin'):
                 raise AccessDenied('Доступ запрещён / 접근 권한이 없습니다.')
             return operation(connection,user.id,client.language)
@@ -135,12 +137,12 @@ async def prompt(update, data, lang, context):
         await show_dates(update,context,data,lang)
         return
     steps = {
-        'start':tr(lang,'Введи начало: YYYY-MM-DD HH:MM. Время Сеула.','시작 시간을 입력하세요: YYYY-MM-DD HH:MM (서울 시간).'),
-        'end':tr(lang,'Введи окончание: YYYY-MM-DD HH:MM. При переходе через полночь укажи следующую дату.','종료: YYYY-MM-DD HH:MM. 자정을 넘으면 다음 날짜를 입력하세요.'),
-        'client':tr(lang,'Введи Telegram ID клиента или «-», если у клиента нет Telegram.','고객 Telegram ID를 입력하거나 Telegram이 없는 고객은 - 를 입력하세요.'),
-        'price':tr(lang,'Введи «авто» для расчёта по тарифам или согласованную полную стоимость: 100000 KRW','요금 자동 계산은 auto, 수동 입력은 100000 KRW 형식으로 입력하세요.'),
+        'start':tr(lang,'Введи начало: YYYY-MM-DD HH:MM. Время Сеула.','시작 시간을 입력하세요: YYYY-MM-DD HH:MM (서울 시간).', 'Enter the start: YYYY-MM-DD HH:MM. Seoul time.'),
+        'end':tr(lang,'Введи окончание: YYYY-MM-DD HH:MM. При переходе через полночь укажи следующую дату.','종료: YYYY-MM-DD HH:MM. 자정을 넘으면 다음 날짜를 입력하세요.', 'Enter the end: YYYY-MM-DD HH:MM. For overnight bookings, use the following date.'),
+        'client':tr(lang,'Введи Telegram ID клиента или «-», если у клиента нет Telegram.','고객 Telegram ID를 입력하거나 Telegram이 없는 고객은 - 를 입력하세요.', "Enter the customer's Telegram ID, or «-» if they do not use Telegram."),
+        'price':tr(lang,'Введи «авто» для расчёта по тарифам или согласованную полную стоимость: 100000 KRW','요금 자동 계산은 auto, 수동 입력은 100000 KRW 형식으로 입력하세요.', 'Enter «auto» to calculate the rate, or the agreed total: 100000 KRW'),
     }
-    await ui.screen(update,context,steps[data['step']] + '\n/cancel — ' + tr(lang,'прервать ввод','입력 중단'))
+    await ui.screen(update,context,steps[data['step']] + '\n/cancel — ' + tr(lang,'прервать ввод','입력 중단', 'stop entering data'))
 
 
 def picker_minimum(data):
@@ -158,9 +160,9 @@ async def show_dates(update,context,data,lang,month=None,text=None):
     if month<minimum.replace(day=1):
         raise BookingError('Past date')
     data.pop('picker_day',None)
-    title=tr(lang,'Выбери дату начала','시작 날짜 선택') if data['step']=='start' else tr(lang,'Выбери дату окончания','종료 날짜 선택')
+    title=tr(lang,'Выбери дату начала','시작 날짜 선택', 'Choose a start date') if data['step']=='start' else tr(lang,'Выбери дату окончания','종료 날짜 선택', 'Choose an end date')
     text=text or title+tr(lang,'. Или введи YYYY-MM-DD HH:MM. Время Сеула. × — недоступные даты. /cancel — прервать.',
-        '. 또는 YYYY-MM-DD HH:MM 형식으로 입력하세요. 서울 시간 기준. ×는 선택 불가 날짜입니다. /cancel 로 중단.')
+        '. 또는 YYYY-MM-DD HH:MM 형식으로 입력하세요. 서울 시간 기준. ×는 선택 불가 날짜입니다. /cancel 로 중단.', '. Or enter YYYY-MM-DD HH:MM. Seoul time. × marks unavailable dates. /cancel to stop.')
     prefix=f"adm:cal:{data['token']}:{data['step']}"
     await ui.screen(update,context,text,reply_markup=month_keyboard(prefix,month,minimum,lang))
 
@@ -171,15 +173,15 @@ async def show_hours(update,context,data,lang,day):
         raise BookingError('Past date')
     values=[hour for hour in range(24) if datetime.combine(day,datetime.min.time(),SEOUL)+timedelta(hours=hour)>=minimum]
     if not values:
-        await show_dates(update,context,data,lang,day.replace(day=1),tr(lang,'На эту дату подходящих часов нет. Выбери другую дату.','해당 날짜에 선택 가능한 시간이 없습니다. 다른 날짜를 선택하세요.'))
+        await show_dates(update,context,data,lang,day.replace(day=1),tr(lang,'На эту дату подходящих часов нет. Выбери другую дату.','해당 날짜에 선택 가능한 시간이 없습니다. 다른 날짜를 선택하세요.', 'No suitable times on this date. Choose another date.'))
         return
     data['picker_day']=day
     prefix=f"adm:hour:{data['token']}:{data['step']}:{day.isoformat()}"
     buttons=[Button(f'{hour:02}:00',callback_data=prefix+f':{hour}') for hour in values]
     rows=[buttons[i:i+4] for i in range(0,len(buttons),4)]
-    rows.append([Button(tr(lang,'К календарю','달력으로'),callback_data=f"adm:cal:{data['token']}:{data['step']}:month:{day.strftime('%Y-%m')}")])
-    title=tr(lang,'Выбери час начала','시작 시간 선택') if data['step']=='start' else tr(lang,'Выбери час окончания','종료 시간 선택')
-    await ui.screen(update,context,f'{title} · {day.isoformat()}\nAsia/Seoul\n'+tr(lang,'Можно ввести YYYY-MM-DD HH:MM вручную.','YYYY-MM-DD HH:MM 형식으로 직접 입력할 수도 있습니다.'),reply_markup=Markup(rows))
+    rows.append([Button(tr(lang,'К календарю','달력으로', 'Back to calendar'),callback_data=f"adm:cal:{data['token']}:{data['step']}:month:{day.strftime('%Y-%m')}")])
+    title=tr(lang,'Выбери час начала','시작 시간 선택', 'Choose a start time') if data['step']=='start' else tr(lang,'Выбери час окончания','종료 시간 선택', 'Choose an end time')
+    await ui.screen(update,context,f'{title} · {day.isoformat()}\nAsia/Seoul\n'+tr(lang,'Можно ввести YYYY-MM-DD HH:MM вручную.','YYYY-MM-DD HH:MM 형식으로 직접 입력할 수도 있습니다.', 'You can also enter YYYY-MM-DD HH:MM manually.'),reply_markup=Markup(rows))
 
 
 async def accept_datetime(update,context,data,lang,value):
@@ -211,31 +213,31 @@ async def review(update, data, lang, context):
         except RulesError as error:
             raise BookingError(str(error)) from None
     data['step']='review'
-    labels = {'create':tr(lang,'Создать запись?','새 항목을 만드시겠습니까?'),
-              'confirm':tr(lang,'Подтвердить бронь? Проверь поступление оплаты в банке.','예약을 승인하시겠습니까? 은행 입금을 확인하세요.'),
-              'submit':tr(lang,'Отправить на подтверждение?','승인 요청을 보내시겠습니까?'),
-              'cancel':tr(lang,'Отменить запись и освободить время?','취소하고 시간을 비우시겠습니까?'),
-              'refund':tr(lang,'Подтверждаешь фактический возврат указанной суммы в банке?','은행에서 표시된 금액을 실제 환불했습니까?'),
-              'move':tr(lang,'Перенести? Согласованная стоимость сохраняется.','일정을 변경하시겠습니까? 합의된 금액은 유지됩니다.')}
+    labels = {'create':tr(lang,'Создать запись?','새 항목을 만드시겠습니까?', 'Create this entry?'),
+              'confirm':tr(lang,'Подтвердить бронь? Проверь поступление оплаты в банке.','예약을 승인하시겠습니까? 은행 입금을 확인하세요.', 'Confirm this booking? Check the payment in your bank account.'),
+              'submit':tr(lang,'Отправить на подтверждение?','승인 요청을 보내시겠습니까?', 'Submit for approval?'),
+              'cancel':tr(lang,'Отменить запись и освободить время?','취소하고 시간을 비우시겠습니까?', 'Cancel this entry and release the time slot?'),
+              'refund':tr(lang,'Подтверждаешь фактический возврат указанной суммы в банке?','은행에서 표시된 금액을 실제 환불했습니까?', 'Confirm that you have actually refunded this amount through the bank?'),
+              'move':tr(lang,'Перенести? Согласованная стоимость сохраняется.','일정을 변경하시겠습니까? 합의된 금액은 유지됩니다.', 'Reschedule? The agreed price will stay the same.')}
     text=labels[data['action']]
     if data['action']=='create' and data.get('kind')=='block':
-        text=tr(lang,'Заблокировать это время? Нажми «Да, выполнить», чтобы сохранить блокировку и отправить её в календарь.','이 시간을 차단하시겠습니까? 실행을 누르면 저장 후 캘린더에 반영됩니다.')
+        text=tr(lang,'Заблокировать это время? Нажми «Да, выполнить», чтобы сохранить блокировку и отправить её в календарь.','이 시간을 차단하시겠습니까? 실행을 누르면 저장 후 캘린더에 반영됩니다.', 'Block this time? Choose «Yes, proceed» to save the block and sync it to the calendar.')
     if data.get('row'):
         text+='\n\n'+card(data['row'],lang)
     if data.get('start'):
         text+=f"\n\n{fmt(data['start'])} → {fmt(data['end'])}\nAsia/Seoul"
     if data.get('planned_cleaning'):
         a,b=data['planned_cleaning']
-        text+='\n'+tr(lang,'Новая уборка: ','예정 청소: ')+fmt(a)+' → '+fmt(b)
+        text+='\n'+tr(lang,'Новая уборка: ','예정 청소: ', 'New cleaning slot: ')+fmt(a)+' → '+fmt(b)
     if data['action']=='create':
         minutes=load_business_config().booking.confirmation_timeout_minutes
-        text+= '\n' + tr(lang,'Блокировка','시간 차단') if data['kind']=='block' else '\n'+tr(lang,f'Заявка: ожидание до {minutes} минут',f'신청: 최대 {minutes}분 승인 대기')
-        text+=f"\n{data['amount']} {data['unit']}\n"+tr(lang,'Клиент ID: ','고객 ID: ')+str(data.get('client_id') or '—')
+        text+= '\n' + tr(lang,'Блокировка','시간 차단', 'Time block') if data['kind']=='block' else '\n'+tr(lang,f'Заявка: ожидание до {minutes} минут',f'신청: 최대 {minutes}분 승인 대기', f'Request: awaiting approval for up to {minutes} minutes')
+        text+=f"\n{data['amount']} {data['unit']}\n"+tr(lang,'Клиент ID: ','고객 ID: ', 'Customer ID: ')+str(data.get('client_id') or '—')
         if data.get('quote'):
-            text+='\n'+tr(lang,'Уборка до: ','청소 종료: ')+fmt(data['quote']['cleaning_ends_at'])
+            text+='\n'+tr(lang,'Уборка до: ','청소 종료: ', 'Cleaning until: ')+fmt(data['quote']['cleaning_ends_at'])
     await ui.screen(update,context,text,reply_markup=Markup([
-        [Button(tr(lang,'Да, выполнить','실행'),callback_data='adm:apply:'+data['token'])],
-        [Button(tr(lang,'Прервать','중단'),callback_data='adm:abort:'+data['token'])],
+        [Button(tr(lang,'Да, выполнить','실행', 'Yes, proceed'),callback_data='adm:apply:'+data['token'])],
+        [Button(tr(lang,'Прервать','중단', 'Stop'),callback_data='adm:abort:'+data['token'])],
     ]))
     ref=context.user_data.get('_ui_screen')
     if ref:
@@ -255,13 +257,13 @@ async def callback(update, context):
         command=parts[1]
         if command=='menu':
             owner=await call(update,context,lambda c,a,l:admin_role(c,a)=='owner')
-            await ui.screen(update,context,tr(lang,'Меню администратора','관리자 메뉴'),reply_markup=menu(lang,owner=owner))
+            await ui.screen(update,context,tr(lang,'Меню администратора','관리자 메뉴', 'Admin menu'),reply_markup=menu(lang,owner=owner))
         elif command=='list':
             mode,page=parts[2],int(parts[3])
             if mode not in ('all','pending','blocks','refunds') or not 0<=page<=100000:
                 raise BookingError('Invalid page')
             rows=await call(update,context,lambda c,a,l:list_bookings(c,a,limit=9,offset=page*8,pending_only=mode=='pending',blocks_only=mode=='blocks',refunds_only=mode=='refunds'))
-            buttons=[[Button(f"#{r['booking_id']} · "+(tr(lang,'Блокировка','시간 차단') if r['type']=='block' else tr(lang,'Бронь','예약'))+f" · {fmt(r['starts_at'])}",callback_data=f"adm:view:{r['booking_id']}")] for r in rows[:8]]
+            buttons=[[Button(f"#{r['booking_id']} · "+(tr(lang,'Блокировка','시간 차단', 'Time block') if r['type']=='block' else tr(lang,'Бронь','예약', 'Booking'))+f" · {fmt(r['starts_at'])}",callback_data=f"adm:view:{r['booking_id']}")] for r in rows[:8]]
             nav=[]
             if page:
                 nav.append(Button('←',callback_data=f'adm:list:{mode}:{page-1}'))
@@ -269,8 +271,8 @@ async def callback(update, context):
                 nav.append(Button('→',callback_data=f'adm:list:{mode}:{page+1}'))
             if nav:
                 buttons.append(nav)
-            buttons.append([Button(tr(lang,'В меню администратора','관리자 메뉴'),callback_data='adm:menu')])
-            await ui.screen(update,context,tr(lang,'Выбери запись:','항목을 선택하세요:') if rows else tr(lang,'Записей нет.','항목이 없습니다.'),reply_markup=Markup(buttons) if buttons else menu(lang))
+            buttons.append([Button(tr(lang,'В меню администратора','관리자 메뉴', 'Admin menu'),callback_data='adm:menu')])
+            await ui.screen(update,context,tr(lang,'Выбери запись:','항목을 선택하세요:', 'Choose an entry:') if rows else tr(lang,'Записей нет.','항목이 없습니다.', 'No entries yet.'),reply_markup=Markup(buttons) if buttons else menu(lang))
         elif command=='view':
             row=await call(update,context,lambda c,a,l:get_booking(c,a,int(parts[2])))
             await ui.screen(update,context,card(row,lang),reply_markup=controls(row,lang))
@@ -329,7 +331,7 @@ async def callback(update, context):
                 raise BookingError('Черновик устарел. Открой /admin. / 임시 입력이 만료되었습니다. /admin 을 여세요.')
             if command=='abort':
                 context.user_data.pop('admin_draft',None)
-                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.'),reply_markup=menu(lang))
+                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.', 'Entry stopped.'),reply_markup=menu(lang))
                 return
             if data['step']=='done':
                 current=await call(update,context,lambda c,a,l:get_booking(c,a,data['result']['booking_id']))
