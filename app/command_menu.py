@@ -19,7 +19,7 @@ def commands(lang='ru',role=None):
         ('help','Помощь' if ru else '도움말'),
         ('get_user_id','Мой Telegram ID' if ru else '내 Telegram ID'),
         ('language','Выбрать язык' if ru else '언어 선택'),
-        ('cancel','Прервать ввод' if ru else '입력 중단'),
+        ('cancel','Прервать и в главное меню' if ru else '작업 중단 · 메인 메뉴'),
     ]
     if role in ('owner','admin'):
         values.append(('admin','Управление бронированиями' if ru else '예약 관리'))

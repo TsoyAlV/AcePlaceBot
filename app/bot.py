@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 
 WELCOME = {
     "ru": "Ace Place — бронирование party room.\n"
-    "Выбери язык. Команда /get_user_id покажет твой Telegram ID.",
+    "Выбери язык. Команда /get_user_id покажет твой Telegram ID.\n"
+    "В любой момент /cancel — прервать текущую операцию и вернуться в главное меню.",
     "ko": "Ace Place 파티룸 예약입니다.\n"
-    "언어를 선택해 주세요. /get_user_id 명령으로 Telegram ID를 확인할 수 있습니다.",
+    "언어를 선택해 주세요. /get_user_id 명령으로 Telegram ID를 확인할 수 있습니다.\n"
+    "언제든 /cancel 로 현재 작업을 중단하고 메인 메뉴로 돌아갈 수 있습니다.",
 }
 
 
@@ -53,17 +55,16 @@ def language_keyboard(lang='ru') -> InlineKeyboardMarkup:
     ]])
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cancelled=False) -> None:
     if update.effective_message:
-        client = await current_client(update, context)
         if getattr(context,'user_data',None) is not None:
-            context.user_data.pop('admin_draft',None)
-            context.user_data.pop('client_draft',None)
-            context.user_data.pop('client_cancel',None)
-            context.user_data.pop('receipt_upload',None)
-            context.user_data.pop('staff_draft',None)
+            for key in ui.FLOW_KEYS:
+                context.user_data.pop(key,None)
+        client = await current_client(update, context)
+        notice=client_ui.tr(client.language,'Операция прервана. Главное меню.\n\n',
+            '작업을 중단했습니다. 메인 메뉴입니다.\n\n') if cancelled else ''
         await ui.screen(update,context,
-            WELCOME[client.language], reply_markup=language_keyboard(client.language)
+            notice+WELCOME[client.language], reply_markup=language_keyboard(client.language)
         )
 
 
@@ -152,15 +153,9 @@ async def book_command(update,context):
 
 
 async def cancel_command(update,context):
-    admin_flow=bool(context.user_data.get('admin_draft') or context.user_data.get('staff_draft'))
-    context.user_data.pop('staff_draft',None)
-    context.user_data.pop('admin_draft',None)
-    context.user_data.pop('client_draft',None)
-    context.user_data.pop('client_cancel',None)
-    context.user_data.pop('receipt_upload',None)
-    lang,role=await client_ui.call(update,context,lambda c,a,u:(u.language,admin_role(c,a)))
-    markup=admin_ui.menu(lang,owner=role=='owner') if admin_flow and role in ('owner','admin') else client_ui.menu(lang)
-    await ui.screen(update,context,client_ui.tr(lang,'Ввод прерван.','입력이 중단되었습니다.'),reply_markup=markup)
+    if not update.effective_chat or update.effective_chat.type!='private':
+        return
+    await start(update,context,cancelled=True)
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
