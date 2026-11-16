@@ -1,12 +1,12 @@
 """Validated business configuration, separate from API secrets in .env."""
 
 from datetime import date, time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 import re
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from app.config import PROJECT_ROOT
 
@@ -212,6 +212,19 @@ class BooksPlansConfig(Model):
         return self
 
 
+class WelcomeConfig(Model):
+    website_url: HttpUrl | None = HttpUrl('https://151.243.177.216/')
+    image_path: str | None = 'assets/telegram/aceplace-start-cover-v1.png'
+
+    @model_validator(mode='after')
+    def safe_image_path(self):
+        if self.image_path:
+            path=PurePosixPath(self.image_path)
+            if path.is_absolute() or '..' in path.parts or '\\' in self.image_path or path.parts[:2]!=('assets','telegram') or path.suffix.lower() not in ('.png','.jpg','.jpeg','.webp'):
+                raise ValueError('Welcome image must be a relative image path inside assets/telegram')
+        return self
+
+
 class BusinessConfig(Model):
     timezone: Literal['Asia/Seoul']
     currency: Literal['KRW']
@@ -225,6 +238,7 @@ class BusinessConfig(Model):
     cancellation: CancellationRules = Field(default_factory=CancellationRules)
     reviews: ReviewsConfig = Field(default_factory=ReviewsConfig)
     books_plans: BooksPlansConfig = Field(default_factory=BooksPlansConfig)
+    welcome: WelcomeConfig = Field(default_factory=WelcomeConfig)
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
