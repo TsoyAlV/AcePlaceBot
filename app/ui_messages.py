@@ -35,6 +35,20 @@ async def _remove(context,ref):
             pass
 
 
+async def welcome_photo(update,context,path):
+    """Separate welcome cover; never treat a photo as the editable text screen."""
+    with path.open('rb') as photo:
+        message=await update.effective_message.reply_photo(photo=photo)
+    ref=_ref(message,update)
+    data=getattr(context,'user_data',None)
+    if ref and data is not None:
+        old=data.get('_ui_welcome_photo')
+        data['_ui_welcome_photo']=ref
+        if old and old!=ref and old[0]==ref[0]:
+            await _remove(context,old)
+    return message
+
+
 async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
     text=with_cancel_hint(text,context)
     if context is None or getattr(context,'user_data',None) is None:

@@ -6,5 +6,11 @@
 !app/**
 !migrations/
 !migrations/*.sql
+!assets/
+!assets/telegram/
+!assets/telegram/*.png
+!assets/telegram/*.jpg
+!assets/telegram/*.jpeg
+!assets/telegram/*.webp
 **/__pycache__/
 **/*.pyc

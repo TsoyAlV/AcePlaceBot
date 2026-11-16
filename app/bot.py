@@ -12,8 +12,10 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.error import TelegramError
 
-from app.config import load_settings
+from app.config import load_settings,PROJECT_ROOT
+from app.business_config import load_business_config
 from app.database import check_database, connect_database
 from app.users import register_client, set_language, admin_role
 from app import admin_ui,client_ui,notifications,payment_ui,calendar_sync,expiry_worker,staff_ui,command_menu
@@ -53,8 +55,11 @@ async def current_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return client
 
 
-def language_keyboard(lang='ru') -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(list(client_ui.menu(lang).inline_keyboard)+[[
+def language_keyboard(lang='ru',website_url=None) -> InlineKeyboardMarkup:
+    rows=list(client_ui.menu(lang).inline_keyboard)
+    if website_url:
+        rows.append([InlineKeyboardButton(client_ui.tr(lang,'Наш сайт','웹사이트','Our website'),url=str(website_url))])
+    return InlineKeyboardMarkup(rows+[[
         InlineKeyboardButton("Русский", callback_data="language:ru"),
         InlineKeyboardButton("한국어", callback_data="language:ko"),
         InlineKeyboardButton("English", callback_data="language:en"),
@@ -69,8 +74,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cancelled
         client = await current_client(update, context)
         notice=client_ui.tr(client.language,'Операция прервана. Главное меню.\n\n',
             '작업을 중단했습니다. 메인 메뉴입니다.\n\n', 'Operation stopped. Main menu.\n\n') if cancelled else ''
+        welcome=load_business_config().welcome
+        if not cancelled and welcome.image_path:
+            image=(PROJECT_ROOT/welcome.image_path).resolve()
+            try:
+                if not image.is_relative_to((PROJECT_ROOT/'assets'/'telegram').resolve()):
+                    raise ValueError('Welcome image path escapes assets/telegram')
+                await ui.welcome_photo(update,context,image)
+            except (OSError,ValueError,TelegramError) as error:
+                logger.warning('Welcome photo unavailable (%s); sending text menu',type(error).__name__)
         await ui.screen(update,context,
-            notice+WELCOME[client.language], reply_markup=language_keyboard(client.language)
+            notice+WELCOME[client.language], reply_markup=language_keyboard(client.language,welcome.website_url)
         )
 
 
@@ -95,7 +109,7 @@ async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await command_menu.sync_profile(context,getattr(update.effective_chat,'id',None),selected,role)
     if query.message and query.message.text == WELCOME[selected]:
         return
-    await ui.screen(update,context,WELCOME[selected], reply_markup=language_keyboard(selected))
+    await ui.screen(update,context,WELCOME[selected], reply_markup=language_keyboard(selected,load_business_config().welcome.website_url))
 
 
 async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,5 +1,8 @@
 # Основные бизнес-настройки Ace Place. Секреты API остаются в .env.
 timezone: Asia/Seoul
+welcome:
+  website_url: "https://151.243.177.216/"
+  image_path: "assets/telegram/aceplace-start-cover-v1.png"
 calendar:
   json_dir: secrets/calendars
   enabled: true
