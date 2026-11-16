@@ -1,4 +1,4 @@
-"""Test bot only. Run one polling process per token."""
+"""Production bot. Run one polling process per token."""
 
 import logging
 import asyncio
@@ -204,8 +204,8 @@ def main() -> int:
     except ValueError as error:
         print(str(error))
         return 1
-    if not settings.telegram_test_token:
-        print("Add the test bot token to TELEGRAM_TEST in .env.")
+    if not settings.telegram_prod_token:
+        print("Add the production bot token to TELEGRAM_PROD in .env.")
         return 1
     try:
         if not check_database(settings):
@@ -215,7 +215,7 @@ def main() -> int:
         print(f"PostgreSQL unavailable ({type(error).__name__}). Run python -m app.check_db.")
         return 1
     try:
-        application = Application.builder().token(settings.telegram_test_token).post_init(start_background).post_shutdown(stop_background).build()
+        application = Application.builder().token(settings.telegram_prod_token).post_init(start_background).post_shutdown(stop_background).build()
         application.bot_data['settings'] = settings
         application.add_handler(CommandHandler(["start", "help", "language"], start, filters=filters.ChatType.PRIVATE))
         application.add_handler(CommandHandler(["myid","get_user_id"], my_id, filters=filters.ChatType.PRIVATE))
@@ -232,10 +232,10 @@ def main() -> int:
         application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, text_message))
         application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL & ~filters.COMMAND, payment_ui.unsupported_input))
         application.add_error_handler(on_error)
-        print("Starting TEST bot. Stop with Ctrl+C. Only one polling process per token.")
+        print("Starting production bot. Stop with Ctrl+C. Only one polling process per token.")
         application.run_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=False, bootstrap_retries=0)
     except Exception as error:
-        print(f"Bot stopped ({type(error).__name__}). Check the test token, network and other polling processes.")
+        print(f"Bot stopped ({type(error).__name__}). Check TELEGRAM_PROD, network and other polling processes.")
         return 1
     return 0
 

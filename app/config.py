@@ -16,7 +16,7 @@ class Settings:
     postgres_db: str
     postgres_user: str
     postgres_password: str = field(repr=False)
-    telegram_test_token: str = field(repr=False)
+    telegram_prod_token: str = field(repr=False)
     google_calendar_id: str = field(default='',repr=False)
     google_token_file: str = ''
     google_client_file: str = ''
@@ -40,7 +40,7 @@ def load_settings() -> Settings:
         postgres_db=os.environ["POSTGRES_DB"],
         postgres_user=os.environ["POSTGRES_USER"],
         postgres_password=os.environ["POSTGRES_PASSWORD"],
-        telegram_test_token=os.getenv("TELEGRAM_TEST", "").strip(),
+        telegram_prod_token=os.getenv("TELEGRAM_PROD", "").strip(),
         google_calendar_id=os.getenv('GOOGLE_CALENDAR_ID',os.getenv('GOOGLE_CALENDAR','')).strip(),
         google_token_file=os.getenv('GOOGLE_TOKEN_FILE','').strip(),
         google_client_file=os.getenv('GOOGLE_OAUTH_CLIENT_FILE',''),
