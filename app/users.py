@@ -60,7 +60,7 @@ def grant_first_owner(connection: Connection, telegram_user_id: int, google_emai
         'SELECT user_id FROM clients WHERE telegram_user_id=%s', (telegram_user_id,),
     ).fetchone()
     if target is None:
-        raise ValueError('User not found. Send /start to the test bot first.')
+        raise ValueError('User not found. Send /start to the bot first.')
     owners = connection.execute("SELECT user_id FROM admins WHERE role='owner'").fetchall()
     if owners:
         if len(owners) == 1 and owners[0][0] == target[0]:
