@@ -2,14 +2,23 @@
 
 import asyncio
 import logging
+import re
 
 from telegram import BotCommand,BotCommandScopeAllPrivateChats,BotCommandScopeChat,MenuButtonCommands
-from telegram.error import TelegramError
+from telegram.error import TelegramError,BadRequest,Forbidden
 
 from app.database import connect_database
 from app.admin_ui import tr
 
 logger=logging.getLogger(__name__)
+
+
+def safe_error_reason(error):
+    """Retain Telegram's error description without URLs, tokens or long IDs."""
+    reason=re.sub(r'https?://\S+','[URL]',str(error))
+    reason=re.sub(r'\b[0-9]{5,}:[A-Za-z0-9_-]{10,}\b','[TOKEN]',reason)
+    reason=re.sub(r'\b[0-9]{7,}\b','[ID]',reason)
+    return ' '.join(reason.split())[:180]
 
 
 def commands(lang='ru',role=None):
@@ -26,10 +35,13 @@ def commands(lang='ru',role=None):
     return [BotCommand(name,description) for name,description in values]
 
 
-async def sync_profile(context,chat_id,lang,role):
+async def sync_profile(context,chat_id,lang,role,*,background=False):
     if not getattr(context,'bot',None) or type(chat_id) is not int or chat_id<=0:
         return
     cache=context.bot_data.setdefault('command_menu_cache',{})
+    unavailable=context.bot_data.setdefault('command_menu_unavailable',set())
+    if background and chat_id in unavailable:
+        return
     signature=(lang,role in ('owner','admin'))
     if cache.get(chat_id)==signature:
         return
@@ -39,6 +51,17 @@ async def sync_profile(context,chat_id,lang,role):
             await context.bot.set_my_commands(commands(lang,role),scope=BotCommandScopeChat(chat_id),language_code=language_code)
         await context.bot.set_chat_menu_button(chat_id=chat_id,menu_button=MenuButtonCommands())
         cache[chat_id]=signature
+        unavailable.discard(chat_id)
+    except (BadRequest,Forbidden) as error:
+        reason=str(error).lower().replace('_',' ')
+        if isinstance(error,Forbidden) or 'chat not found' in reason or 'user not found' in reason:
+            # A different bot cannot reach all users inherited from the shared DB.
+            # Retry on their next interaction, not every background sweep.
+            unavailable.add(chat_id)
+            cache.pop(chat_id,None)
+            logger.info('Command menu deferred for an unavailable chat; retry on next user interaction')
+        else:
+            logger.warning('Command menu update failed (BadRequest: %s)',safe_error_reason(error))
     except TelegramError as error:
         logger.warning('Command menu update failed (%s)',type(error).__name__)
 
@@ -73,7 +96,7 @@ async def reconcile(application):
         application.bot_data['command_menu_defaults']=True
     rows=await asyncio.to_thread(profiles,application.bot_data['settings'])
     for chat,lang,role in rows:
-        await sync_profile(application,chat,lang,role)
+        await sync_profile(application,chat,lang,role,background=True)
 
 
 async def loop(application):
