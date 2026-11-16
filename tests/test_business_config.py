@@ -13,6 +13,7 @@ class BusinessConfigTests(unittest.TestCase):
         self.assertEqual(config.pricing.weekday_base_amount,150000)
         self.assertEqual(config.pricing.weekend_holiday_extra_hour_amount,20000)
         self.assertEqual(config.payment.deposit_amount,50000)
+        self.assertFalse(config.cancellation.deposit_refundable_before_cutoff)
         self.assertIsInstance(config.payment.account_number,str)
 
     def test_cleaning_overlap_is_rejected(self):

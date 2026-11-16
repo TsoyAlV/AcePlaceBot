@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import test_bookings as fixtures
 from app import bookings,client_ui,notifications,admin_ui
-from app.cancellation_rules import calculate,policy_text
+from app.cancellation_rules import calculate,policy_text,current_policy,policy_for
 from app.database import connect_database
 
 
@@ -42,6 +42,47 @@ class CancellationRuleTests(unittest.TestCase):
             self.assertIn('72',text)
             self.assertIn('50000',text)
 
+    def test_new_terms_withhold_deposit_even_for_early_cancellation(self):
+        row=self.row()
+        row['cancellation']['policy']['deposit_refundable_before_cutoff']=False
+        for hours in (168,72,1):
+            with self.subTest(hours=hours):
+                quote=calculate(row,row['starts_at']-timedelta(hours=hours))
+                self.assertFalse(quote['deposit_refundable'])
+                self.assertEqual(Decimal(quote['withheld_amount']),50000)
+                self.assertEqual(Decimal(quote['refund_amount']),100000)
+                self.assertIsNone(quote['refund_deadline'])
+
+    def test_new_terms_never_withhold_unreceived_money_or_more_than_cap(self):
+        for deposit,balance,withheld,refund in (
+            ('50000','0',50000,0),('20000','100000',20000,100000),
+            ('70000','100000',50000,120000),('0','100000',0,100000)):
+            with self.subTest(deposit=deposit,balance=balance):
+                row=self.row(deposit,balance)
+                row['cancellation']['policy']['deposit_refundable_before_cutoff']=False
+                quote=calculate(row,row['starts_at']-timedelta(days=7))
+                self.assertEqual(Decimal(quote['withheld_amount']),withheld)
+                self.assertEqual(Decimal(quote['refund_amount']),refund)
+
+    def test_new_policy_is_saved_but_bookings_without_snapshot_keep_legacy_terms(self):
+        config=SimpleNamespace(cancellation=SimpleNamespace(refund_cutoff_hours=72,
+            deposit_refundable_before_cutoff=False),payment=SimpleNamespace(deposit_amount=50000),currency='KRW')
+        self.assertFalse(current_policy(config)['deposit_refundable_before_cutoff'])
+        row=self.row()
+        row['cancellation']={}
+        with patch('app.cancellation_rules.load_business_config',return_value=config):
+            self.assertTrue(policy_for(row)['deposit_refundable_before_cutoff'])
+            self.assertEqual(Decimal(calculate(row,row['starts_at']-timedelta(days=7))['refund_amount']),150000)
+
+    def test_new_ru_ko_terms_state_no_deposit_refund_without_72_hour_promise(self):
+        policy=self.row()['cancellation']['policy']
+        policy['deposit_refundable_before_cutoff']=False
+        self.assertIn('не возвращается',policy_text(policy,'ru'))
+        self.assertIn('환불되지 않습니다',policy_text(policy,'ko'))
+        for lang in ('ru','ko'):
+            self.assertNotIn('72',policy_text(policy,lang))
+            self.assertIn('50000',policy_text(policy,lang))
+
 
 @unittest.skipUnless(os.getenv('RUN_DB_TESTS')=='1','Set RUN_DB_TESTS=1')
 class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
@@ -54,10 +95,11 @@ class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.use_schema(c)
         return c
 
-    def create(self,late=False):
+    def create(self,late=False,legacy=False):
         start=self.start if not late else (datetime.now(timezone.utc)+timedelta(days=2)).replace(minute=0,second=0,microsecond=0)
         with self.connection(self.settings) as c:
-            row=bookings.create_booking(c,101,user_id=self.client,starts_at=start,ends_at=start+timedelta(hours=5),amount='150000',request_key=uuid4())
+            policy=dict(refund_cutoff_hours=72,deposit_amount='50000',unit='KRW') if legacy else None
+            row=bookings.create_booking(c,101,user_id=self.client,starts_at=start,ends_at=start+timedelta(hours=5),amount='150000',request_key=uuid4(),cancellation_policy=policy)
             row=bookings.change_booking(c,101,row['booking_id'],action='confirm',expected_version=row['version'])
             c.execute('UPDATE bookings SET deposit_paid_amount=50000,balance_paid_amount=100000 WHERE booking_id=%s',(row['booking_id'],))
             return bookings.get_booking(c,101,row['booking_id'])
@@ -92,7 +134,7 @@ class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_refund_list_and_admin_completion_are_separate_and_durable(self):
         row=self.cancel(self.create())
         await self.deliver()
-        self.assertEqual(Decimal(row['cancellation']['quote']['refund_amount']),150000)
+        self.assertEqual(Decimal(row['cancellation']['quote']['refund_amount']),100000)
         self.assertEqual(len(bookings.list_bookings(self.c,101,refunds_only=True)),1)
         self.assertEqual(bookings.list_bookings(self.c,101),[])
         with self.connection(self.settings) as c:
@@ -108,7 +150,7 @@ class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Возврат выполнен',bot.send_message.call_args.kwargs['text'])
 
     async def test_preview_requires_confirmation_and_rechecks_72_hour_boundary(self):
-        row=self.create()
+        row=self.create(legacy=True)
         cutoff=row['starts_at']-timedelta(hours=72)
         context=SimpleNamespace(bot_data={'settings':self.settings},user_data={})
         with patch('app.client_ui.connect_database',side_effect=self.connection):
@@ -141,17 +183,18 @@ class CancellationDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_booking_displays_and_saves_cancellation_terms(self):
         row=self.create()
+        self.assertFalse(row['cancellation']['policy']['deposit_refundable_before_cutoff'])
         for lang in ('ru','ko'):
             text=client_ui.card(row,lang)
-            self.assertIn('72',text)
             self.assertIn('50000',text)
+            self.assertIn('не возвращается' if lang=='ru' else '환불되지 않습니다',text)
         self.assertTrue(any(b.callback_data.startswith('cli:cancel:') for line in client_ui.controls(row,'ru').inline_keyboard for b in line))
 
     async def test_policy_change_requires_new_booking_consent(self):
         config=bookings.load_business_config().model_copy(deep=True)
-        policy=dict(refund_cutoff_hours=72,deposit_amount='50000',unit='KRW')
+        policy=current_policy(config)
         quote=bookings.quote_rental(self.start,self.end)
-        config.cancellation.refund_cutoff_hours=48
+        config.cancellation.deposit_refundable_before_cutoff=True
         with self.connection(self.settings) as c,patch('app.bookings.load_business_config',return_value=config):
             with self.assertRaises(bookings.BookingError):
                 bookings.create_client_booking(c,102,details=dict(contact_phone='00000000000',guests_count=40,event_name='Level up'),starts_at=self.start,ends_at=self.end,

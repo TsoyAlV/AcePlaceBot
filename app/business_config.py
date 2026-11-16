@@ -135,6 +135,7 @@ class VisitConfig(Model):
 
 
 class CancellationRules(Model):
+    deposit_refundable_before_cutoff: bool = Field(default=False,strict=True)
     refund_cutoff_hours: int = Field(default=72,ge=1,le=8760,strict=True)
 
 
