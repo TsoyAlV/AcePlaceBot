@@ -3,6 +3,16 @@
 from telegram.error import BadRequest,TelegramError
 from telegram import InlineKeyboardMarkup,ReplyKeyboardMarkup,ReplyKeyboardRemove
 
+FLOW_KEYS=('admin_draft','client_draft','client_cancel','receipt_upload','staff_draft')
+
+
+def with_cancel_hint(text,context):
+    data=getattr(context,'user_data',None) or {}
+    if '/cancel' in text or not any(key in data for key in FLOW_KEYS):
+        return text
+    hint='\n\n/cancel — прервать операцию и в главное меню / 작업 중단 후 메인 메뉴'
+    return text+hint if len((text+hint).encode('utf-16-le'))//2<=4096 else text
+
 
 def _ref(message,update):
     mid=getattr(message,'message_id',None)
@@ -25,6 +35,7 @@ async def _remove(context,ref):
 
 
 async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
+    text=with_cancel_hint(text,context)
     if context is None or getattr(context,'user_data',None) is None:
         return await update.effective_message.reply_text(text,reply_markup=reply_markup)
     data=context.user_data
@@ -101,6 +112,7 @@ def action_source(update):
 
 
 async def error(update,context,text):
+    text=with_cancel_hint(text,context)
     message=await update.effective_message.reply_text(text)
     if context is not None and getattr(context,'user_data',None) is not None:
         ref=_ref(message,update)

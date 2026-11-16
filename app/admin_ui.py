@@ -400,10 +400,8 @@ async def text_input(update, context):
 
 
 async def cancel_input(update,context):
-    if not update.effective_chat or update.effective_chat.type!='private':
-        return
-    context.user_data.pop('admin_draft',None)
-    await ui.screen(update,context,'Ввод прерван. / 입력이 중단되었습니다.\n/admin')
+    from app.bot import cancel_command
+    await cancel_command(update,context)
 
 
 async def show_error(update,error,context=None):

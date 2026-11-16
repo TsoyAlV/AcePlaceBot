@@ -8,11 +8,16 @@ from app.business_config import load_business_config
 def current_policy(config=None):
     config=config or load_business_config()
     return dict(refund_cutoff_hours=config.cancellation.refund_cutoff_hours,
+        deposit_refundable_before_cutoff=config.cancellation.deposit_refundable_before_cutoff,
         deposit_amount=str(config.payment.deposit_amount),unit=config.currency)
 
 
 def policy_for(row):
-    return (row.get('cancellation') or {}).get('policy') or current_policy()
+    snapshot=(row.get('cancellation') or {}).get('policy')
+    if snapshot:
+        return snapshot
+    # Pre-policy bookings retain the previous early-cancellation terms.
+    return dict(current_policy(),deposit_refundable_before_cutoff=True)
 
 
 def calculate(row,now):
@@ -21,17 +26,25 @@ def calculate(row,now):
     if row['unit']!=policy['unit']:
         raise BookingError('Возврат в этой валюте согласуйте с администратором. / 해당 통화의 환불은 관리자에게 문의하세요.')
     cutoff=row['starts_at']-timedelta(hours=policy['refund_cutoff_hours'])
-    early=now<=cutoff
+    refundable_before_cutoff=policy.get('deposit_refundable_before_cutoff',True)
+    early=refundable_before_cutoff and now<=cutoff
     paid=row['deposit_paid_amount']+row['balance_paid_amount']
     withheld=Decimal('0') if early else min(row['deposit_paid_amount'],Decimal(policy['deposit_amount']))
     return dict(policy=policy,deposit_refundable=early,paid_amount=str(paid),withheld_amount=str(withheld),
-        refund_amount=str(paid-withheld),unit=row['unit'],refund_deadline=cutoff.isoformat())
+        refund_amount=str(paid-withheld),unit=row['unit'],
+        refund_deadline=cutoff.isoformat() if refundable_before_cutoff else None)
 
 
 def policy_text(policy,lang):
     hours=policy['refund_cutoff_hours']
     amount=policy['deposit_amount']
     unit=policy['unit']
+    if not policy.get('deposit_refundable_before_cutoff',True):
+        if lang=='ko':
+            return (f'취소 규정: 취소 시점과 관계없이 수령한 예약금 중 최대 {amount} {unit}은 환불되지 않습니다. '
+                '나머지 확인된 결제 금액은 환불 대상이며 관리자가 수동으로 처리합니다.')
+        return (f'Условия отмены: независимо от срока отмены полученная предоплата — до {amount} {unit} — не возвращается. '
+            'Остаток подтверждённой оплаты подлежит возврату. Возврат выполняет администратор вручную.')
     if lang=='ko':
         return (f'취소 규정: 시작 {hours}시간 전까지 취소하면 확인된 결제 금액을 환불합니다. '
             f'{hours}시간 미만 남은 경우 수령한 선입금 중 최대 {amount} {unit}은 환불되지 않으며 나머지는 환불 대상입니다. '
