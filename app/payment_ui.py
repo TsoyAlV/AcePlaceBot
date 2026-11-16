@@ -89,6 +89,11 @@ async def callback(update,context):
         await error_message(update,error,context)
 
 
+async def unsupported_input(update,context):
+    if context.user_data.get('receipt_upload'):
+        await error_message(update,BookingError('Send an image'),context)
+
+
 async def media_input(update,context):
     bid=context.user_data.get('receipt_upload')
     if not bid:
@@ -115,7 +120,15 @@ async def media_input(update,context):
 
 async def error_message(update,error,context=None):
     text=str(error)
-    if 'Late payment' in text:
+    if text=='Send an image':
+        message='Видео и кружочки не подходят. Отправь фото или PNG/JPEG/WebP-файл до 10 МБ. Бронь выбрана, повторно нажимать кнопку не нужно. / 동영상과 동영상 메시지는 지원하지 않습니다. 10MB 이하 사진 또는 PNG/JPEG/WebP 파일을 보내세요. 예약을 다시 선택할 필요는 없습니다.'
+    elif text=='Image too large':
+        message='Изображение больше 10 МБ. Отправь уменьшенное фото или файл до 10 МБ. / 이미지가 10MB를 초과합니다. 크기를 줄여 다시 보내세요.'
+    elif 'already linked to another booking' in text:
+        message='Это изображение уже прикреплено к другой брони. Отправь отдельное подтверждение оплаты для выбранной брони или свяжись с администратором. / 다른 예약에 이미 첨부된 이미지입니다. 이 예약의 별도 결제 증빙을 보내거나 관리자에게 문의하세요.'
+    elif 'Deposit is already recorded' in text:
+        message='Предоплата по этой брони уже отмечена. Дополнительное подтверждение не требуется. / 이 예약의 선입금이 이미 기록되어 추가 증빙이 필요하지 않습니다.'
+    elif 'Late payment' in text:
         message='Срок заявки истёк или она отменена. Требуется ручное решение по оплате; время не восстановлено. / 만료 또는 취소된 신청입니다. 결제는 수동 확인이 필요하며 시간은 복구되지 않았습니다.'
     elif 'awaiting review or accepted' in text:
         message='Скриншот уже на проверке или принят. Дождись решения администратора. / 이미 검토 중이거나 승인되었습니다.'
