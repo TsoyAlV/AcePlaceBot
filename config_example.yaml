@@ -42,10 +42,10 @@ notifications:
     telegram_enabled: true
 visit:
   # Отправляется клиенту вместе с подтверждением брони.
-  # route_url пока не задан.
+  # Ссылка Kakao Map на адрес; на карте можно построить маршрут.
   ru:
     address: '경기 안산시 단원구 중앙대로 829 — здание свадебного зала «The Luce», этаж B1.'
-    route_url: ""
+    route_url: "https://kko.to/Hn6onZrkRD"
     entry_instructions: |-
       На этаже B1 после выхода из лифта поверните направо.
 
@@ -56,7 +56,7 @@ visit:
       По воскресеньям парковка полностью бесплатная, но регистрация автомобиля обязательна. Из-за свадеб свободных мест может не быть.
   ko:
     address: '경기 안산시 단원구 중앙대로 829, "The Luce" 웨딩홀 건물 지하 1층(B1).'
-    route_url: ""
+    route_url: "https://kko.to/Hn6onZrkRD"
     entry_instructions: |-
       지하 1층(B1)에서 엘리베이터를 내린 후 오른쪽으로 오시면 됩니다.
 
