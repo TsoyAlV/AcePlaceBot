@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
 
 from telegram import BotCommandScopeChat,MenuButtonCommands
-from telegram.error import TimedOut
+from telegram.error import TimedOut,BadRequest,Forbidden
 from app import command_menu
 from app.bot import my_id,select_language,WELCOME
 from app.users import Client
@@ -46,6 +46,49 @@ class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
         context.bot.set_my_commands.side_effect=None
         await command_menu.sync_profile(context,102,'ru',None)
         self.assertIn(102,context.bot_data['command_menu_cache'])
+
+    async def test_unknown_chats_are_skipped_in_background_until_user_interacts(self):
+        context=self.context()
+        context.bot.set_my_commands.side_effect=BadRequest('Chat not found')
+        with patch('app.command_menu.profiles',return_value=[(102,'ru',None)]):
+            # Default commands remain available to new users.
+            context.bot_data['command_menu_defaults']=True
+            await command_menu.reconcile(context)
+            await command_menu.reconcile(context)
+        self.assertEqual(context.bot.set_my_commands.await_count,1)
+        self.assertNotIn(102,context.bot_data['command_menu_cache'])
+        context.bot.set_my_commands.side_effect=None
+        await command_menu.sync_profile(context,102,'ru',None)
+        self.assertNotIn(102,context.bot_data['command_menu_unavailable'])
+        self.assertIn(102,context.bot_data['command_menu_cache'])
+
+    async def test_blocked_chat_does_not_interrupt_other_profiles(self):
+        context=self.context()
+        context.bot_data['command_menu_defaults']=True
+        context.bot.set_my_commands.side_effect=[Forbidden('Bot was blocked by the user'),None,None,None,None]
+        with patch('app.command_menu.profiles',return_value=[(101,'ru','owner'),(102,'ko',None)]):
+            await command_menu.reconcile(context)
+        self.assertIn(101,context.bot_data['command_menu_unavailable'])
+        self.assertIn(102,context.bot_data['command_menu_cache'])
+
+    async def test_other_bad_requests_are_reported_and_retried(self):
+        context=self.context()
+        context.bot.set_my_commands.side_effect=BadRequest('Bot_commands_invalid')
+        with self.assertLogs('app.command_menu',level='WARNING') as logs:
+            await command_menu.sync_profile(context,102,'ru',None,background=True)
+        self.assertIn('bot_commands_invalid',' '.join(logs.output).lower())
+        self.assertNotIn(102,context.bot_data['command_menu_unavailable'])
+        context.bot.set_my_commands.side_effect=None
+        await command_menu.sync_profile(context,102,'ru',None,background=True)
+        self.assertIn(102,context.bot_data['command_menu_cache'])
+
+    def test_error_description_hides_urls_tokens_and_chat_ids(self):
+        token='123456789:'+('x'*35)
+        reason=command_menu.safe_error_reason(BadRequest('Unexpected response '+token+' chat 987654321 https://example.invalid/'+token))
+        self.assertIn('Unexpected response',reason)
+        self.assertNotIn(token,reason)
+        self.assertNotIn('987654321',reason)
+        self.assertNotIn('https://',reason)
 
     async def test_startup_refreshes_existing_users_and_external_role_changes(self):
         context=self.context()
