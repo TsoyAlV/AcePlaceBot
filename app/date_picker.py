@@ -13,9 +13,11 @@ def parse_month(value):
 
 def month_keyboard(prefix,month,minimum,lang):
     month=month.replace(day=1)
-    title=f'{month.year}년 {month.month}월' if lang=='ko' else f'{MONTHS_RU[month.month-1]} {month.year}'
+    title=(f'{month.year}년 {month.month}월' if lang=='ko' else
+           f'{calendar.month_name[month.month]} {month.year}' if lang=='en' else f'{MONTHS_RU[month.month-1]} {month.year}')
     noop=prefix+':noop'
-    weekdays=('월','화','수','목','금','토','일') if lang=='ko' else ('Пн','Вт','Ср','Чт','Пт','Сб','Вс')
+    weekdays=(('월','화','수','목','금','토','일') if lang=='ko' else
+              ('Mon','Tue','Wed','Thu','Fri','Sat','Sun') if lang=='en' else ('Пн','Вт','Ср','Чт','Пт','Сб','Вс'))
     rows=[[Button(title,callback_data=noop)],[Button(day,callback_data=noop) for day in weekdays]]
     for week in calendar.Calendar(firstweekday=0).monthdayscalendar(month.year,month.month):
         buttons=[]

@@ -132,6 +132,7 @@ class VisitText(Model):
 class VisitConfig(Model):
     ru: VisitText = Field(default_factory=VisitText)
     ko: VisitText = Field(default_factory=VisitText)
+    en: VisitText = Field(default_factory=VisitText)
 
 
 class CancellationRules(Model):
@@ -162,6 +163,9 @@ class ReviewsConfig(Model):
     ko: ReviewText = Field(default_factory=lambda:ReviewText(
         message='AcePlace를 이용해 주셔서 감사합니다! 🎉\n즐거운 시간 보내셨기를 바랍니다.\n\n이용 후기를 남겨 주세요. 여러분의 후기는 더 나은 서비스를 만드는 데 도움이 되고, 다른 손님들이 행사 장소를 선택하는 데에도 큰 도움이 됩니다.\n\n{review_link}\n\n다시 뵙기를 기다리겠습니다! 💛',
         link_text='⭐ 후기 남기기'))
+    en: ReviewText = Field(default_factory=lambda:ReviewText(
+        message='Thank you for choosing AcePlace! 🎉\nWe hope you had a wonderful time.\n\nShare your experience — your feedback helps us improve and helps other guests choose a place for their event.\n\n{review_link}\n\nWe look forward to welcoming you again! 💛',
+        link_text='⭐ Leave a review'))
 
 
 class BooksPlanInterval(Model):
@@ -223,6 +227,20 @@ class BusinessConfig(Model):
     books_plans: BooksPlansConfig = Field(default_factory=BooksPlansConfig)
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    """Reject duplicate settings instead of silently losing the earlier value."""
+
+    def construct_mapping(self,node,deep=False):
+        self.flatten_mapping(node)
+        result={}
+        for key_node,value_node in node.value:
+            key=self.construct_object(key_node,deep=deep)
+            if key in result:
+                raise ValueError(f'Duplicate config key: {key} (line {key_node.start_mark.line+1})')
+            result[key]=self.construct_object(value_node,deep=deep)
+        return result
+
+
 def load_business_config(path: Path | None = None) -> BusinessConfig:
     with (path or PROJECT_ROOT / 'config.yaml').open(encoding='utf-8') as stream:
-        return BusinessConfig.model_validate(yaml.safe_load(stream))
+        return BusinessConfig.model_validate(yaml.load(stream,Loader=UniqueKeyLoader))

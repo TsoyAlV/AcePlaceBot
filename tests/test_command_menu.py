@@ -35,7 +35,7 @@ class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.bot.set_my_commands.await_count,calls)
         await command_menu.sync_profile(context,102,'ru',None)
         self.assertNotIn('admin',[c.command for c in context.bot.set_my_commands.call_args.args[0]])
-        self.assertEqual(context.bot.set_my_commands.await_count,calls+3)
+        self.assertEqual(context.bot.set_my_commands.await_count,calls+4)
 
     async def test_network_failure_does_not_fail_action_and_is_retried(self):
         context=self.context()

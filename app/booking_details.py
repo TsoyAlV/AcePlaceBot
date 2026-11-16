@@ -44,6 +44,8 @@ def text(row,lang='ru'):
     if not any(row.get(k) is not None for k in ('contact_phone','guests_count','event_name')):
         return ''
     labels=('Телефон','Количество гостей','Мероприятие') if lang!='ko' else ('연락처','인원수','행사')
+    if lang=='en':
+        labels=('Phone','Number of guests','Event')
     return '\n'.join(label+': '+str(row.get(key) or '—') for label,key in zip(labels,('contact_phone','guests_count','event_name')))
 
 
@@ -52,4 +54,6 @@ def payment_text(row,lang='ru'):
         return f'{value:,.2f}'.rstrip('0').rstrip('.').replace(',',' ')+f" {row['unit']}"
     paid=row['deposit_paid_amount']+row['balance_paid_amount']
     labels=('Общая стоимость','Аванс получен','К доплате') if lang!='ko' else ('총금액','확인된 선입금','잔금')
+    if lang=='en':
+        labels=('Total price','Deposit received','Amount due')
     return '\n'.join(label+': '+money(value) for label,value in zip(labels,(row['amount'],row['deposit_paid_amount'],max(0,row['amount']-paid))))

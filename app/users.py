@@ -16,7 +16,8 @@ def register_client(
     connection: Connection, *, telegram_user_id: int, telegram_chat_id: int,
     name: str, username: str | None, language_code: str | None,
 ) -> Client:
-    default_language = 'ko' if (language_code or '').lower().startswith('ko') else 'ru'
+    code=(language_code or '').lower().split('-')[0].split('_')[0]
+    default_language = code if code in ('ru','ko','en') else 'ru'
     row = connection.execute(
         """INSERT INTO clients(telegram_user_id, telegram_chat_id, name, username, language)
         VALUES (%s, %s, %s, %s, %s)
@@ -30,7 +31,7 @@ def register_client(
 
 
 def set_language(connection: Connection, telegram_user_id: int, language: str) -> None:
-    if language not in ('ru', 'ko'):
+    if language not in ('ru', 'ko', 'en'):
         raise ValueError('Unsupported language')
     row = connection.execute(
         'UPDATE clients SET language=%s WHERE telegram_user_id=%s RETURNING user_id',

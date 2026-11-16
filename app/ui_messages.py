@@ -10,7 +10,8 @@ def with_cancel_hint(text,context):
     data=getattr(context,'user_data',None) or {}
     if '/cancel' in text or not any(key in data for key in FLOW_KEYS):
         return text
-    hint='\n\n/cancel — прервать операцию и в главное меню / 작업 중단 후 메인 메뉴'
+    hint=('\n\n/cancel — stop and return to the main menu' if data.get('_language')=='en' else
+          '\n\n/cancel — прервать операцию и в главное меню / 작업 중단 후 메인 메뉴')
     return text+hint if len((text+hint).encode('utf-16-le'))//2<=4096 else text
 
 
@@ -112,6 +113,10 @@ def action_source(update):
 
 
 async def error(update,context,text):
+    data=getattr(context,'user_data',None) or {}
+    if data.get('_language')=='en':
+        from app.error_texts import english_error
+        text=english_error(text)
     text=with_cancel_hint(text,context)
     message=await update.effective_message.reply_text(text)
     if context is not None and getattr(context,'user_data',None) is not None:

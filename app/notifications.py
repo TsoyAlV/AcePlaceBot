@@ -21,13 +21,13 @@ logger=logging.getLogger(__name__)
 
 def visit_text(config,lang):
     """Use the client's language, falling back to the other configured language."""
-    primary=config.visit.ko if lang=='ko' else config.visit.ru
+    primary=getattr(config.visit,lang if lang in ('ru','ko','en') else 'ru')
     fallback=config.visit.ru if lang=='ko' else config.visit.ko
     lines=[]
     for field,label in (
-        ('address',tr(lang,'Адрес: ','주소: ')),
-        ('route_url',tr(lang,'Маршрут: ','오시는 길: ')),
-        ('entry_instructions',tr(lang,'Инструкция входа: ','입장 안내: ')),
+        ('address',tr(lang,'Адрес: ','주소: ', 'Address: ')),
+        ('route_url',tr(lang,'Маршрут: ','오시는 길: ', 'Map and directions: ')),
+        ('entry_instructions',tr(lang,'Инструкция входа: ','입장 안내: ', 'Entry instructions: ')),
     ):
         value=getattr(primary,field).strip() or getattr(fallback,field).strip()
         if value:
@@ -168,7 +168,7 @@ async def deliver_pending(bot,settings,limit=20):
                 continue
             if event=='plan_conflict':
                 from app.admin_ui import fmt
-                text=tr(lang,'⚠️ Конфликт books_plans: существующие брони сохранены. Указанные занятия исключены из серии Google Calendar. Исправьте расписание или перенесите бронь.','⚠️ books_plans 일정 충돌: 기존 예약은 유지되며 해당 정기 일정은 Google Calendar에서 제외됩니다. 일정 또는 예약 시간을 변경하세요.')
+                text=tr(lang,'⚠️ Конфликт books_plans: существующие брони сохранены. Указанные занятия исключены из серии Google Calendar. Исправьте расписание или перенесите бронь.','⚠️ books_plans 일정 충돌: 기존 예약은 유지되며 해당 정기 일정은 Google Calendar에서 제외됩니다. 일정 또는 예약 시간을 변경하세요.', '⚠️ books_plans conflict: existing bookings have been kept. Conflicting sessions are excluded from the Google Calendar series. Update the schedule or reschedule the booking.')
                 for conflict in row['request_data'].get('conflicts',[])[:20]:
                     text+='\n'+fmt(datetime.fromisoformat(conflict['start']))+' · #'+', #'.join(map(str,conflict['booking_ids'][:10]))
                 await bot.send_message(chat_id=chat,text=text)
@@ -180,21 +180,21 @@ async def deliver_pending(bot,settings,limit=20):
             cancel_ru='Бронь отменена' if client or not client_cancel else ('Клиент отменил бронь' if cancelled_booking else 'Клиент отозвал заявку')
             cancel_ko='예약이 취소되었습니다' if client or not client_cancel else ('고객이 예약을 취소했습니다' if cancelled_booking else '고객이 신청을 철회했습니다')
             titles={
-                'created':tr(lang,'Новая заявка','새 예약 신청'),
-                'confirm':tr(lang,'Бронь подтверждена','예약이 확정되었습니다'),
-                'cancel':tr(lang,cancel_ru,cancel_ko),
-                'move':tr(lang,'Время брони изменено','예약 시간이 변경되었습니다'),
-                'submit':tr(lang,'Заявка отправлена на подтверждение','예약 승인 요청'),
-                'expired':tr(lang,'Срок заявки истёк','예약 신청이 만료되었습니다'),
-                'deposit_received':tr(lang,'Предоплата получена. Подтверждение брони — отдельно.','선입금이 확인되었습니다. 예약 승인은 별도입니다.'),
-                'receipt_rejected':tr(lang,'Нужен другой скриншот оплаты','다른 결제 증빙 이미지가 필요합니다'),
-                'cleaning_reminder':tr(lang,'Напоминание: скоро уборка','알림: 청소 예정'),
-                'refund_completed':tr(lang,'Бронь отменена. Возврат выполнен','예약 취소 및 환불 완료'),
+                'created':tr(lang,'Новая заявка','새 예약 신청', 'New booking request'),
+                'confirm':tr(lang,'Бронь подтверждена','예약이 확정되었습니다', 'Booking confirmed'),
+                'cancel':tr(lang,cancel_ru,cancel_ko, 'Booking cancelled' if client or not client_cancel else ('Customer cancelled the booking' if cancelled_booking else 'Customer withdrew the request')),
+                'move':tr(lang,'Время брони изменено','예약 시간이 변경되었습니다', 'Booking time changed'),
+                'submit':tr(lang,'Заявка отправлена на подтверждение','예약 승인 요청', 'Request submitted for approval'),
+                'expired':tr(lang,'Срок заявки истёк','예약 신청이 만료되었습니다', 'Booking request expired'),
+                'deposit_received':tr(lang,'Предоплата получена. Подтверждение брони — отдельно.','선입금이 확인되었습니다. 예약 승인은 별도입니다.', 'Deposit received. Booking approval is a separate step.'),
+                'receipt_rejected':tr(lang,'Нужен другой скриншот оплаты','다른 결제 증빙 이미지가 필요합니다', 'Another payment image is needed'),
+                'cleaning_reminder':tr(lang,'Напоминание: скоро уборка','알림: 청소 예정', 'Reminder: cleaning is coming up'),
+                'refund_completed':tr(lang,'Бронь отменена. Возврат выполнен','예약 취소 및 환불 완료', 'Booking cancelled. Refund completed'),
             }
-            text=titles.get(event,tr(lang,'Бронь изменена','예약 변경'))+'\n'
+            text=titles.get(event,tr(lang,'Бронь изменена','예약 변경', 'Booking updated'))+'\n'
             if event=='move' and state.get('previous_start'):
                 from app.admin_ui import fmt
-                text+=tr(lang,'Было: ','이전: ')+fmt(datetime.fromisoformat(state['previous_start']))+' → '+fmt(datetime.fromisoformat(state['previous_end']))+'\n'
+                text+=tr(lang,'Было: ','이전: ', 'Previously: ')+fmt(datetime.fromisoformat(state['previous_start']))+' → '+fmt(datetime.fromisoformat(state['previous_end']))+'\n'
             text+=(client_ui.card(row,lang) if client else card(row,lang))
             if event=='confirm' and client:
                 instructions=visit_text(load_business_config(),lang)
