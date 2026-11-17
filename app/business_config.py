@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from app.config import PROJECT_ROOT
+from app.venue_information import ADDRESS_PARKING
 
 Day = Literal['MON','TUE','WED','THU','FRI','SAT','SUN']
 
@@ -212,6 +213,16 @@ class BooksPlansConfig(Model):
         return self
 
 
+class PublicInformationText(Model):
+    ru: str = Field(default=ADDRESS_PARKING['ru'],min_length=1,max_length=3500)
+    ko: str = Field(default=ADDRESS_PARKING['ko'],min_length=1,max_length=3500)
+    en: str = Field(default=ADDRESS_PARKING['en'],min_length=1,max_length=3500)
+
+
+class InformationConfig(Model):
+    address_parking: PublicInformationText = Field(default_factory=PublicInformationText)
+
+
 class WelcomeConfig(Model):
     website_url: HttpUrl | None = HttpUrl('https://151.243.177.216/')
     image_path: str | None = 'assets/telegram/aceplace-start-cover-v1.png'
@@ -239,6 +250,7 @@ class BusinessConfig(Model):
     reviews: ReviewsConfig = Field(default_factory=ReviewsConfig)
     books_plans: BooksPlansConfig = Field(default_factory=BooksPlansConfig)
     welcome: WelcomeConfig = Field(default_factory=WelcomeConfig)
+    information: InformationConfig = Field(default_factory=InformationConfig)
 
 
 class UniqueKeyLoader(yaml.SafeLoader):

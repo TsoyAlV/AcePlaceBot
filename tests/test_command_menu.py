@@ -11,7 +11,7 @@ from app.users import Client
 
 class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
     def context(self):
-        return SimpleNamespace(bot_data={'settings':object()},bot=SimpleNamespace(set_my_commands=AsyncMock(),set_chat_menu_button=AsyncMock()))
+        return SimpleNamespace(user_data={},bot_data={'settings':object()},bot=SimpleNamespace(set_my_commands=AsyncMock(),set_chat_menu_button=AsyncMock()))
 
     async def test_menu_is_private_localized_and_admin_only_when_allowed(self):
         context=self.context()
@@ -21,7 +21,7 @@ class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
                 await command_menu.sync_profile(context,102,'ko',role)
                 call=context.bot.set_my_commands.call_args
                 values=call.args[0]
-                self.assertEqual('admin' in [v.command for v in values],admin)
+                self.assertEqual([v.command for v in values],['start','help','get_user_id','cancel','address','price'])
                 self.assertIn('get_user_id',[v.command for v in values])
                 self.assertEqual(values[0].description,'메인 메뉴')
                 self.assertEqual(call.kwargs['scope'],BotCommandScopeChat(102))
@@ -108,7 +108,8 @@ class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.bot.current_client',new=AsyncMock(return_value=Client(1,102,'ru'))),patch('app.bot.connect_database'),patch('app.bot.set_language'),patch('app.bot.admin_role',return_value='admin'):
             await select_language(update,context)
         self.assertEqual(context.bot.set_my_commands.call_args.args[0][0].description,'메인 메뉴')
-        self.assertIn('admin',[v.command for v in context.bot.set_my_commands.call_args.args[0]])
+        self.assertNotIn('admin',[v.command for v in context.bot.set_my_commands.call_args.args[0]])
+        self.assertTrue(any('관리자' in b.text for row in context.user_data['_ui_navigation_keyboard'].keyboard for b in row))
 
     async def test_get_user_id_outputs_callers_telegram_id(self):
         context=self.context()
@@ -116,4 +117,4 @@ class CommandMenuTests(unittest.IsolatedAsyncioTestCase):
         update=SimpleNamespace(effective_message=message,effective_user=SimpleNamespace(id=102))
         with patch('app.bot.current_client',new=AsyncMock(return_value=Client(1,102,'ru'))):
             await my_id(update,context)
-        message.reply_text.assert_awaited_once_with('Telegram ID: 102')
+        self.assertEqual(message.reply_text.call_args.args[0],'Telegram ID: 102')

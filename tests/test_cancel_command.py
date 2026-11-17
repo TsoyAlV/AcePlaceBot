@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
 
-from telegram import ReplyKeyboardRemove
+from telegram import ReplyKeyboardMarkup
 from app import bot,ui_messages as ui,command_menu
 
 
@@ -32,11 +32,10 @@ class CancelCommandTests(unittest.IsolatedAsyncioTestCase):
                     text=update.effective_message.reply_text.call_args.args[0]
                     self.assertIn(bot.WELCOME[lang],text)
                     self.assertIn('/cancel',text)
-                    self.assertIsInstance(update.effective_message.reply_text.call_args.kwargs['reply_markup'],ReplyKeyboardRemove)
-                    markup=context.bot.edit_message_reply_markup.call_args.kwargs['reply_markup']
-                    actions=[b.callback_data for row in markup.inline_keyboard for b in row]
-                    self.assertIn('cli:new',actions)
-                    self.assertIn('language:ru',actions)
+                    markup=update.effective_message.reply_text.call_args.kwargs['reply_markup']
+                    self.assertIsInstance(markup,ReplyKeyboardMarkup)
+                    self.assertTrue(markup.is_persistent)
+                    self.assertIn('🌍 Language',[b.text for row in markup.keyboard for b in row])
                     self.assertFalse(context.user_data['_ui_reply_keyboard'])
 
     async def test_cancel_calls_start_and_ignores_group_chats(self):

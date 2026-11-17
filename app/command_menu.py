@@ -24,14 +24,12 @@ def safe_error_reason(error):
 def commands(lang='ru',role=None):
     values=[
         ('start',tr(lang,'Главное меню','메인 메뉴','Main menu')),
-        ('book',tr(lang,'Забронировать','예약하기','Book now')),
         ('help',tr(lang,'Помощь','도움말','Help')),
         ('get_user_id',tr(lang,'Мой Telegram ID','내 Telegram ID','My Telegram ID')),
-        ('language',tr(lang,'Выбрать язык','언어 선택','Choose language')),
         ('cancel',tr(lang,'Прервать и в главное меню','작업 중단 · 메인 메뉴','Stop and return to main menu')),
+        ('address',tr(lang,'Адрес и парковка','오시는 길 및 주차','Address and parking')),
+        ('price',tr(lang,'Прайс','운영 시간 및 요금','Opening hours and prices')),
     ]
-    if role in ('owner','admin'):
-        values.append(('admin',tr(lang,'Управление бронированиями','예약 관리','Manage bookings')))
     return [BotCommand(name,description) for name,description in values]
 
 

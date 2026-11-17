@@ -21,16 +21,18 @@ class WelcomeTests(unittest.IsolatedAsyncioTestCase):
         update=SimpleNamespace(effective_message=message,effective_chat=SimpleNamespace(id=102,type='private'),callback_query=None)
         return context,update
 
-    async def test_start_sends_cover_and_localized_website_button(self):
-        for lang,label in (('ru','Наш сайт'),('ko','웹사이트'),('en','Our website')):
+    async def test_start_sends_cover_and_localized_bottom_keyboard(self):
+        for lang,label in (('ru','🌐 Наш сайт'),('ko','🌐 웹사이트'),('en','🌐 Our website')):
             with self.subTest(lang=lang):
                 context,update=self.context_update()
                 with patch('app.bot.current_client',new=AsyncMock(return_value=Client(1,102,lang))):
                     await bot.start(update,context)
                 update.effective_message.reply_photo.assert_awaited_once()
                 kwargs=update.effective_message.reply_text.call_args.kwargs
-                links=[b for row in kwargs['reply_markup'].inline_keyboard for b in row if b.url]
-                self.assertEqual([(b.text,b.url) for b in links],[(label,'https://151.243.177.216/')])
+                labels=[b.text for row in kwargs['reply_markup'].keyboard for b in row]
+                self.assertIn(label,labels)
+                self.assertIn('🌍 Language',labels)
+                self.assertTrue(kwargs['reply_markup'].is_persistent)
                 self.assertIn(bot.WELCOME[lang],update.effective_message.reply_text.call_args.args[0])
                 self.assertEqual(context.user_data['_ui_welcome_photo'],[102,100])
                 self.assertEqual(context.user_data['_ui_screen'],[102,101])
