@@ -16,9 +16,10 @@ from app.cancellation_rules import current_policy,policy_for,policy_text,quote_t
 from app.business_config import load_business_config
 from app.database import connect_database
 from app.rental_rules import SEOUL
-from app.users import register_client
+from app.users import register_client,admin_role
 from app.date_picker import month_keyboard,parse_month
 from app import booking_details
+from app import navigation
 
 
 def menu(lang):
@@ -34,10 +35,25 @@ async def call(update,context,operation):
         with connect_database(context.bot_data['settings']) as c:
             client=register_client(c,telegram_user_id=user.id,telegram_chat_id=chat.id,
                 name=user.full_name,username=user.username,language_code=user.language_code)
-            if getattr(context,'user_data',None) is not None:
-                context.user_data['_language']=client.language
-            return operation(c,user.id,client)
-    return await asyncio.to_thread(execute)
+            return operation(c,user.id,client),client.language,admin_role(c,user.id)
+    result,lang,role=await asyncio.to_thread(execute)
+    navigation.configure(context,lang,role)
+    return result
+
+
+async def show_mine(update,context,page=0):
+    if not 0<=page<=100000:
+        raise BookingError('Invalid page')
+    def fetch(c,a,u):
+        rows=c.execute("SELECT booking_id,starts_at FROM bookings WHERE user_id=%s AND status <> 'cancelled' ORDER BY starts_at DESC LIMIT 9 OFFSET %s",(u.user_id,page*8)).fetchall()
+        return rows,u.language
+    rows,lang=await call(update,context,fetch)
+    buttons=[[Button(f'#{bid} · {fmt(start)}',callback_data=f'cli:view:{bid}')] for bid,start in rows[:8]]
+    if page:
+        buttons.append([Button('←',callback_data=f'cli:mine:{page-1}')])
+    if len(rows)>8:
+        buttons.append([Button('→',callback_data=f'cli:mine:{page+1}')])
+    await ui.screen(update,context,tr(lang,'Мои брони','내 예약','My bookings') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.','No bookings yet.'),reply_markup=Markup(buttons) if buttons else None)
 
 
 def own_booking(c,actor,bid):
@@ -189,18 +205,7 @@ async def callback(update,context):
         elif command=='date':
             await accept_date(update,context,parts[2],lang)
         elif command=='mine':
-            page=int(parts[2])
-            if not 0<=page<=100000:
-                raise BookingError('Invalid page')
-            def fetch(c,a,u):
-                return c.execute("SELECT booking_id,starts_at FROM bookings WHERE user_id=%s AND status <> 'cancelled' ORDER BY starts_at DESC LIMIT 9 OFFSET %s",(u.user_id,page*8)).fetchall()
-            rows=await call(update,context,fetch)
-            buttons=[[Button(f'#{bid} · {fmt(start)}',callback_data=f'cli:view:{bid}')] for bid,start in rows[:8]]
-            if page:
-                buttons.append([Button('←',callback_data=f'cli:mine:{page-1}')])
-            if len(rows)>8:
-                buttons.append([Button('→',callback_data=f'cli:mine:{page+1}')])
-            await ui.screen(update,context,tr(lang,'Мои брони','내 예약', 'My bookings') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.', 'No bookings yet.'),reply_markup=Markup(buttons) if buttons else menu(lang))
+            await show_mine(update,context,int(parts[2]))
         elif command in ('cancel','cancel_yes'):
             if command=='cancel':
                 bid=int(parts[2])
@@ -250,7 +255,7 @@ async def callback(update,context):
                 raise BookingError('Draft expired')
             if command=='abort':
                 context.user_data.pop('client_draft',None)
-                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.', 'Entry stopped.'),reply_markup=menu(lang))
+                await ui.screen(update,context,tr(lang,'Ввод прерван.','입력이 중단되었습니다.', 'Entry stopped.'),reply_markup=None)
             elif command=='edit':
                 if data['step']!='review':
                     raise BookingError('Draft expired')

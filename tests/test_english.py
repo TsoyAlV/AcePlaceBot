@@ -22,12 +22,12 @@ def english_only(test,text):
 class EnglishTests(unittest.IsolatedAsyncioTestCase):
     async def test_language_button_persists_english_and_updates_all_menu_scopes(self):
         context=SimpleNamespace(user_data={},bot_data={'settings':object()},bot=SimpleNamespace(set_my_commands=AsyncMock(),set_chat_menu_button=AsyncMock()))
-        update=SimpleNamespace(callback_query=SimpleNamespace(data='language:en',answer=AsyncMock(),message=None),effective_chat=SimpleNamespace(id=42,type='private'))
+        update=SimpleNamespace(effective_message=SimpleNamespace(),callback_query=SimpleNamespace(data='language:en',answer=AsyncMock(),message=None),effective_chat=SimpleNamespace(id=42,type='private'))
         with patch('app.bot.current_client',new=AsyncMock(return_value=Client(1,42,'ru'))),patch('app.bot.connect_database'),patch('app.bot.set_language') as save,patch('app.bot.admin_role',return_value=None),patch('app.bot.ui.screen',new=AsyncMock()) as screen:
             await bot.select_language(update,context)
         self.assertEqual(save.call_args.args[1:],(42,'en'))
         self.assertEqual(context.user_data['_language'],'en')
-        self.assertIn('Choose your language',screen.call_args.args[2])
+        self.assertIn('Language updated',screen.call_args.args[2])
         self.assertEqual({c.kwargs['language_code'] for c in context.bot.set_my_commands.call_args_list},{'','ru','ko','en'})
         for call in context.bot.set_my_commands.call_args_list:
             self.assertEqual(call.args[0][0].description,'Main menu')

@@ -49,13 +49,37 @@ async def welcome_photo(update,context,path):
     return message
 
 
-async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
+async def ensure_navigation(update,context):
+    data=getattr(context,'user_data',None)
+    if data is None or not data.get('_ui_navigation_keyboard'):
+        return
+    signature=data.get('_ui_navigation_signature')
+    if data.get('_ui_navigation_sent')==signature and not data.get('_ui_reply_keyboard'):
+        return
+    text={'ru':'Меню действий','ko':'메뉴','en':'Action menu'}.get(data.get('_language'),'Меню действий')
+    message=await update.effective_message.reply_text(text,reply_markup=data['_ui_navigation_keyboard'])
+    ref=_ref(message,update)
+    if ref:
+        old=data.get('_ui_navigation_message')
+        data['_ui_navigation_message']=ref
+        if old and old!=ref and old[0]==ref[0]:
+            await _remove(context,old)
+    data['_ui_navigation_sent']=signature
+    data['_ui_reply_keyboard']=False
+
+
+async def screen(update,context,text,*,reply_markup=None,keep=False,key=None,parse_mode=None):
     text=with_cancel_hint(text,context)
+    formatting={'parse_mode':parse_mode} if parse_mode else {}
     if context is None or getattr(context,'user_data',None) is None:
-        return await update.effective_message.reply_text(text,reply_markup=reply_markup)
+        return await update.effective_message.reply_text(text,reply_markup=reply_markup,**formatting)
     data=context.user_data
     if key and key in data.get('_ui_results',{}):
         return
+    if reply_markup is None and data.get('_ui_navigation_keyboard'):
+        reply_markup=data['_ui_navigation_keyboard']
+    if isinstance(reply_markup,InlineKeyboardMarkup):
+        await ensure_navigation(update,context)
     old=data.get('_ui_screen')
     remove_keyboard=data.get('_ui_reply_keyboard',False) and not isinstance(reply_markup,ReplyKeyboardMarkup)
     # Only a screen registered by this running process may be edited or removed.
@@ -67,7 +91,7 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
     message=None
     if old and getattr(update,'callback_query',None) and getattr(context,'bot',None) and not remove_keyboard and (reply_markup is None or isinstance(reply_markup,InlineKeyboardMarkup)):
         try:
-            message=await context.bot.edit_message_text(chat_id=old[0],message_id=old[1],text=text,reply_markup=reply_markup)
+            message=await context.bot.edit_message_text(chat_id=old[0],message_id=old[1],text=text,reply_markup=reply_markup,**formatting)
             ref=old
         except BadRequest as error:
             if 'message is not modified' in str(error).lower():
@@ -75,11 +99,14 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None):
         except TelegramError:
             pass
     if ref is None:
-        message=await update.effective_message.reply_text(text,reply_markup=ReplyKeyboardRemove() if remove_keyboard else reply_markup)
+        message=await update.effective_message.reply_text(text,reply_markup=ReplyKeyboardRemove() if remove_keyboard else reply_markup,**formatting)
         ref=_ref(message,update)
         if remove_keyboard and isinstance(reply_markup,InlineKeyboardMarkup) and ref and getattr(context,'bot',None):
             await context.bot.edit_message_reply_markup(chat_id=ref[0],message_id=ref[1],reply_markup=reply_markup)
-        data['_ui_reply_keyboard']=isinstance(reply_markup,ReplyKeyboardMarkup)
+        is_navigation=reply_markup is not None and reply_markup==data.get('_ui_navigation_keyboard')
+        data['_ui_reply_keyboard']=isinstance(reply_markup,ReplyKeyboardMarkup) and not is_navigation
+        if is_navigation:
+            data['_ui_navigation_sent']=data.get('_ui_navigation_signature')
         # Send the next prompt before removing the previous one.
         if ref:
             await _remove(context,old)

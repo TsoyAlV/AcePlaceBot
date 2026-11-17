@@ -18,6 +18,7 @@ from app.business_config import load_business_config
 from app.rental_rules import next_cleaning, RulesError
 from app.date_picker import month_keyboard,parse_month
 from app import booking_details
+from app import navigation
 
 SEOUL = ZoneInfo('Asia/Seoul')
 
@@ -120,10 +121,13 @@ async def call(update, context, operation):
                 username=user.username, language_code=user.language_code)
             if getattr(context,'user_data',None) is not None:
                 context.user_data['_language']=client.language
-            if admin_role(connection,user.id) not in ('owner','admin'):
+            role=admin_role(connection,user.id)
+            if role not in ('owner','admin'):
                 raise AccessDenied('Доступ запрещён / 접근 권한이 없습니다.')
-            return operation(connection,user.id,client.language)
-    return await asyncio.to_thread(execute)
+            return operation(connection,user.id,client.language),client.language,role
+    result,lang,role=await asyncio.to_thread(execute)
+    navigation.configure(context,lang,role)
+    return result
 
 
 def draft(context, **values):
