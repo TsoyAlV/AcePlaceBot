@@ -25,15 +25,30 @@ from app import navigation,venue_information
 logger = logging.getLogger(__name__)
 
 WELCOME = {
-    "ru": "Ace Place — бронирование party room.\n"
-    "Выбери действие кнопками внизу. /help — помощь.\n"
-    "В любой момент /cancel — прервать текущую операцию и вернуться в главное меню.",
-    "ko": "Ace Place 파티룸 예약입니다.\n"
-    "아래 버튼에서 원하는 기능을 선택하세요. /help — 도움말.\n"
-    "언제든 /cancel 로 현재 작업을 중단하고 메인 메뉴로 돌아갈 수 있습니다.",
-    "en": "Ace Place — party room bookings.\n"
-    "Choose an action using the buttons below. /help — help.\n"
-    "Use /cancel at any time to stop the current operation and return to the main menu.",
+    "ru": "🎉 Добро пожаловать в AcePlace!\n\n"
+    "Используйте кнопки на клавиатуре под полем ввода сообщения:\n\n"
+    "📅 Забронировать — выбрать дату и время.\n"
+    "📋 Мои брони — посмотреть свои заявки и бронирования.\n"
+    "🌐 Наш сайт — узнать больше о площадке.\n"
+    "🌍 Language — выбрать язык.\n\n"
+    "/help — инструкция по использованию бота.\n"
+    "/cancel — прервать текущее действие и вернуться в главное меню.",
+    "ko": "🎉 AcePlace에 오신 것을 환영합니다!\n\n"
+    "메시지 입력란 아래 키보드의 버튼을 이용하세요:\n\n"
+    "📅 예약하기 — 날짜와 시간 선택.\n"
+    "📋 내 예약 — 내 신청 및 예약 확인.\n"
+    "🌐 웹사이트 — 공간에 대해 자세히 알아보기.\n"
+    "🌍 Language — 언어 선택.\n\n"
+    "/help — 봇 이용 안내.\n"
+    "/cancel — 현재 작업을 중단하고 메인 메뉴로 돌아가기.",
+    "en": "🎉 Welcome to AcePlace!\n\n"
+    "Use the keyboard buttons below the message input field:\n\n"
+    "📅 Book now — choose a date and time.\n"
+    "📋 My bookings — view your requests and bookings.\n"
+    "🌐 Our website — learn more about the venue.\n"
+    "🌍 Language — choose your language.\n\n"
+    "/help — instructions for using the bot.\n"
+    "/cancel — stop the current action and return to the main menu.",
 }
 
 
@@ -70,8 +85,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, *, cancelled
                 context.user_data.pop(key,None)
         client = await current_client(update, context)
         navigation.configure(context,client.language,(getattr(context,'user_data',None) or {}).get('_role'))
-        notice=client_ui.tr(client.language,'Операция прервана. Главное меню.\n\n',
-            '작업을 중단했습니다. 메인 메뉴입니다.\n\n', 'Operation stopped. Main menu.\n\n') if cancelled else ''
+        notice=client_ui.tr(client.language,'Операция прервана.\n\n',
+            '작업을 중단했습니다.\n\n', 'Operation stopped.\n\n') if cancelled else ''
         welcome=load_business_config().welcome
         if not cancelled and welcome.image_path:
             image=(PROJECT_ROOT/welcome.image_path).resolve()
@@ -91,7 +106,7 @@ async def help_command(update,context):
     client=await current_client(update,context)
     navigation.configure(context,client.language,(getattr(context,'user_data',None) or {}).get('_role'))
     text=client_ui.tr(client.language,
-        'Как пользоваться AcePlace\n\n📅 «Забронировать» — выберите дату, длительность и время, затем ответьте на три вопроса и отправьте заявку. До отправки время не резервируется.\n📋 «Мои брони» — статус, оплата и отмена своих бронирований.\n🌐 «Наш сайт» — ссылка на сайт.\n🌍 Language — выбор языка.\n\nПосле отправки оплатите предоплату по реквизитам и приложите скриншот через карточку брони. Проверка оплаты и подтверждение аренды выполняются администратором. Условия отмены указаны в карточке.\n\n/address — адрес и парковка\n/price — график работы и тарифы\n/get_user_id — ваш Telegram ID\n/cancel — прервать ввод и вернуться в главное меню.',
+        'Как пользоваться AcePlace\n\n📅 «Забронировать» — выберите дату, длительность и время, затем ответьте на три вопроса и отправьте заявку. До отправки время не резервируется.\n📋 «Мои брони» — статус, оплата и отмена своих бронирований.\n🌐 «Наш сайт» — ссылка на сайт.\n🌍 Language — выбор языка.\n\nПосле отправки заявки на бронь оплатите предоплату и отправьте скриншот об оплате. После проверки оплаты Вам придёт уведомление о подтверждении брони.\n\n/address — адрес и парковка\n/price — график работы и тарифы\n/get_user_id — ваш Telegram ID\n/cancel — прервать ввод и вернуться в главное меню.',
         'AcePlace 이용 방법\n\n📅 «예약하기» — 날짜, 이용 시간, 시작 시간을 선택하고 세 가지 질문에 답한 후 신청하세요. 신청 전에는 시간이 확보되지 않습니다.\n📋 «내 예약» — 예약 상태, 결제 및 취소를 확인하세요.\n🌐 «웹사이트» — 웹사이트 링크.\n🌍 Language — 언어 선택.\n\n신청 후 안내된 계좌로 선입금하고 예약 화면에서 결제 증빙을 보내 주세요. 입금 확인과 예약 승인은 관리자가 진행합니다. 취소 조건은 예약 화면에 표시됩니다.\n\n/address — 오시는 길 및 주차\n/price — 운영 시간 및 요금\n/get_user_id — 내 Telegram ID\n/cancel — 입력을 중단하고 메인 메뉴로 돌아가기.',
         'How to use AcePlace\n\n📅 Book now — select a date, duration and start time, answer three questions and submit your request. Your time is not reserved before submission.\n📋 My bookings — check status, payment and cancellation options.\n🌐 Our website — website link.\n🌍 Language — choose your language.\n\nAfter submitting, transfer the deposit using the provided bank details and upload your payment screenshot from the booking card. An administrator checks payment and confirms the rental separately. Cancellation terms are shown in the booking card.\n\n/address — address and parking\n/price — opening hours and prices\n/get_user_id — your Telegram ID\n/cancel — stop the current form and return to the main menu.')
     await ui.screen(update,context,text)

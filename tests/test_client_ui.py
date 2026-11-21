@@ -6,7 +6,7 @@ from datetime import timedelta
 
 import test_bookings as fixtures
 import app.bookings as bookings
-from app import client_ui,notifications
+from app import client_ui,notifications,payment_ui
 from app.database import connect_database
 
 
@@ -60,11 +60,51 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             row=bookings.get_booking(self.c,102,draft['result_id'])
             self.assertEqual(row['user_id'],self.client)
             self.assertEqual(row['status'],'pending')
+            self.assertEqual(context.user_data['receipt_upload'],row['booking_id'])
             self.assertEqual(row['amount'],draft['quote']['amount'])
             self.assertEqual((row['contact_phone'],row['guests_count'],row['event_name']),('00000000000',40,'Level up'))
             self.assertEqual(len(row['admin_notifications']),1)
             await client_ui.callback(self.update(data=f"cli:withdraw_yes:{row['booking_id']}:{row['version']}"),context)
             self.assertEqual(bookings.get_booking(self.c,102,row['booking_id'])['status'],'cancelled')
+            self.assertNotIn('receipt_upload',context.user_data)
+
+    async def test_photo_can_be_sent_immediately_and_is_bound_to_the_new_booking(self):
+        with self.connection(self.settings) as c:
+            old=bookings.create_booking(c,101,user_id=self.client,starts_at=self.start+timedelta(days=2),ends_at=self.end+timedelta(days=2),amount='150000',request_key=__import__('uuid').uuid4())
+            old=bookings.change_booking(c,101,old['booking_id'],action='confirm',expected_version=old['version'])
+        context=self.context()
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            draft=await self.review(context)
+            sent=self.update(data='cli:send:'+draft['token'])
+            await client_ui.callback(sent,context)
+            self.assertIn('нажимать отдельную кнопку не нужно',sent.effective_message.reply_text.call_args.args[0])
+            upload=self.update()
+            upload.effective_message.photo=[SimpleNamespace(file_id='new-photo',file_unique_id='new-proof',file_size=1024)]
+            upload.effective_message.document=None
+            await payment_ui.media_input(upload,context)
+        row=bookings.get_booking(self.c,102,draft['result_id'])
+        self.assertEqual(row['payment_receipt']['file_unique_id'],'new-proof')
+        self.assertEqual(row['payment_receipt']['review_status'],'pending')
+        self.assertEqual(row['deposit_paid_amount'],0)
+        self.assertEqual(row['status'],'pending')
+        self.assertIsNone(bookings.get_booking(self.c,102,old['booking_id'])['payment_receipt'])
+        self.assertNotIn('receipt_upload',context.user_data)
+
+    async def test_invalid_file_keeps_automatic_upload_ready_for_valid_document(self):
+        context=self.context()
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            draft=await self.review(context)
+            await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)
+            upload=self.update()
+            upload.effective_message.photo=[]
+            upload.effective_message.document=SimpleNamespace(file_id='pdf',file_unique_id='pdf-file',mime_type='application/pdf',file_size=1024)
+            await payment_ui.media_input(upload,context)
+            self.assertEqual(context.user_data['receipt_upload'],draft['result_id'])
+            upload.effective_message.document=SimpleNamespace(file_id='receipt-file',file_unique_id='receipt-doc',mime_type='image/png',file_size=1024)
+            await payment_ui.media_input(upload,context)
+        row=bookings.get_booking(self.c,102,draft['result_id'])
+        self.assertEqual(row['payment_receipt']['media_type'],'document')
+        self.assertEqual(row['payment_receipt']['file_unique_id'],'receipt-doc')
 
     async def test_questions_are_required_and_invalid_answers_do_not_advance(self):
         context=self.context()

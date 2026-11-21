@@ -168,7 +168,7 @@ def list_bookings(connection: Connection, actor: int, *, limit: int | None = Non
     condition += " AND (request_data->>'source'='books_plans' AND request_data->>'role'='series') IS NOT TRUE"
     condition += " AND (request_data->>'source'='books_plans' AND request_data->>'role'='occurrence' AND ends_at<=clock_timestamp()) IS NOT TRUE"
     if admin_role(connection, actor) not in ('owner', 'admin'):
-        condition += ' AND user_id=%s'
+        condition += ' AND user_id=%s AND client_deleted_at IS NULL'
         params = (_user(connection, actor),)
     elif not refunds_only:
         condition += " AND status<>'completed' AND ends_at>statement_timestamp()"

@@ -91,3 +91,19 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('первые 4 часа бесплатны',venue_information.address_text(config,'ru'))
         config.pricing.weekday_base_amount=160000
         self.assertIn('160 000',venue_information.price_text(config,'ru'))
+        config.payment.deposit_amount=40000
+        config.cancellation.deposit_refundable_before_cutoff=False
+        for lang,removed,condition in (
+            ('ru','Стоимость может меняться','при отмене брони не возвращается'),
+            ('ko','요금은 변경될 수 있습니다','취소 시 환불되지 않습니다'),
+            ('en','Prices may change','non-refundable if you cancel'),
+        ):
+            price=venue_information.price_text(config,lang)
+            self.assertIn('40 000',price)
+            self.assertIn(condition,price)
+            self.assertNotIn(removed,price)
+        config.cancellation.deposit_refundable_before_cutoff=True
+        config.cancellation.refund_cutoff_hours=72
+        price=venue_information.price_text(config,'ru')
+        self.assertIn('за 72 ч и более',price)
+        self.assertNotIn('при отмене брони не возвращается',price)

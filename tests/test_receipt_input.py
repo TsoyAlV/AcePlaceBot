@@ -1,14 +1,59 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from datetime import datetime,timedelta,timezone
 
 from telegram import Update
 from telegram.ext import filters
 from app import payment_ui
+from app import client_ui
 from app.bookings import BookingError
 
 
 class ReceiptInputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_creating_request_arms_upload_and_next_photo_needs_no_upload_button(self):
+        now=datetime.now(timezone.utc)
+        row=dict(booking_id=6,type='booking',status='pending',expires_at=now+timedelta(hours=1),
+            ends_at=now+timedelta(days=1),deposit_paid_amount=0,payment_receipt=None)
+        payment=SimpleNamespace(deposit_amount=50000,bank='TEST',account_number='000',account_holder='TEST')
+        draft=dict(token='token',key=object(),step='review',start=now+timedelta(days=1),end=now+timedelta(days=1,hours=5),
+            deposit=50000,payment=('TEST','000','TEST'),quote={},cancellation_policy={},details={})
+        context=SimpleNamespace(user_data={'client_draft':draft},bot_data={})
+        message=SimpleNamespace(reply_text=AsyncMock())
+        update=SimpleNamespace(callback_query=SimpleNamespace(data='cli:send:token',answer=AsyncMock()),effective_message=message)
+        async def call(update,ctx,operation):
+            return operation(None,42,SimpleNamespace(language='ru'))
+        with patch('app.client_ui.call',new=AsyncMock(side_effect=call)), \
+             patch('app.client_ui.load_business_config',return_value=SimpleNamespace(payment=payment)), \
+             patch('app.client_ui.create_client_booking',return_value=row), \
+             patch('app.client_ui.card',return_value='Booking #6'), \
+             patch('app.client_ui.controls',return_value=None), \
+             patch('app.notifications.wake_delivery'), \
+             patch('app.client_ui.ui.result',new=AsyncMock()) as result, \
+             patch('app.payment_ui.submit_receipt',return_value=row) as submit:
+            await client_ui.callback(update,context)
+            self.assertEqual(context.user_data['receipt_upload'],6)
+            self.assertIn('нажимать отдельную кнопку не нужно',result.call_args.args[2])
+            photo=self.update({'photo':[{'file_id':'image','file_unique_id':'i','width':597,'height':1280,'file_size':1024}]})
+            await payment_ui.media_input(photo,context)
+        self.assertEqual(submit.call_args.args,(None,42,6))
+        self.assertNotIn('receipt_upload',context.user_data)
+
+    def test_automatic_upload_is_not_armed_for_inactive_paid_or_already_submitted_bookings(self):
+        now=datetime.now(timezone.utc)
+        row=dict(booking_id=6,type='booking',status='pending',expires_at=now+timedelta(hours=1),
+            ends_at=now+timedelta(days=1),deposit_paid_amount=0,payment_receipt=None)
+        for changes in (dict(status='cancelled'),dict(status='expired'),dict(status='completed'),
+                        dict(expires_at=now-timedelta(seconds=1)),dict(deposit_paid_amount=50000),
+                        dict(payment_receipt={'review_status':'pending'}),dict(payment_receipt={'review_status':'accepted'})):
+            with self.subTest(changes=changes):
+                context=SimpleNamespace(user_data={'receipt_upload':6})
+                self.assertFalse(payment_ui.expect_receipt_after_booking(context,dict(row,**changes)))
+                self.assertNotIn('receipt_upload',context.user_data)
+        context=SimpleNamespace(user_data={})
+        self.assertTrue(payment_ui.expect_receipt_after_booking(context,row))
+        self.assertEqual(context.user_data['receipt_upload'],6)
+
     def update(self, media):
         payload={'message_id':1,'date':1,'chat':{'id':42,'type':'private'},
                  'from':{'id':42,'is_bot':False,'first_name':'Test'},**media}
