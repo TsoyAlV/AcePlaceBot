@@ -1,4 +1,4 @@
-"""Explicit screenshot upload and manual bank verification in private chats."""
+"""Booking-bound image upload and manual bank verification in private chats."""
 
 from telegram import InlineKeyboardButton as Button,InlineKeyboardMarkup as Markup
 from datetime import datetime,timezone
@@ -7,6 +7,26 @@ from app import client_ui,admin_ui
 from app import ui_messages as ui
 from app.bookings import BookingError,get_booking
 from app.payments import submit_receipt,review_receipt
+
+
+def upload_prompt(row,lang):
+    return admin_ui.tr(lang,
+        f"После перевода отправь подтверждение оплаты прямо сюда для брони #{row['booking_id']} — нажимать отдельную кнопку не нужно. Подойдёт фото или PNG/JPEG/WebP-файл до 10 МБ. /cancel — выйти из загрузки. Отправка файла не подтверждает поступление денег и бронь автоматически.",
+        f"송금 후 예약 #{row['booking_id']}의 결제 증빙을 이 채팅에 바로 보내세요. 별도 버튼을 누를 필요가 없습니다. 사진 또는 10MB 이하 PNG/JPEG/WebP 파일을 보낼 수 있습니다. /cancel 로 업로드를 중단하세요. 파일 전송만으로 입금과 예약이 확정되지는 않습니다.",
+        f"After transferring the deposit, send payment evidence here for booking #{row['booking_id']} — no extra button is needed. Send a photo or PNG/JPEG/WebP file up to 10 MB. /cancel to exit upload mode. Sending a file does not automatically confirm payment or your booking.")
+
+
+def expect_receipt_after_booking(context,row):
+    """Only arm the exact booking just created/replayed, never guess another one."""
+    now=datetime.now(timezone.utc)
+    receipt=row.get('payment_receipt') or {}
+    active=(row['status']=='pending' and row.get('expires_at') and row['expires_at']>now) or (row['status']=='confirmed' and row['ends_at']>now)
+    ready=(row['type']=='booking' and active and row['deposit_paid_amount']==0 and receipt.get('review_status') in (None,'rejected'))
+    if ready:
+        context.user_data['receipt_upload']=row['booking_id']
+    elif context.user_data.get('receipt_upload')==row['booking_id']:
+        context.user_data.pop('receipt_upload',None)
+    return bool(ready)
 
 
 def admin_controls(row,lang):
@@ -60,9 +80,7 @@ async def callback(update,context):
             context.user_data.pop('staff_draft',None)
             context.user_data.pop('client_cancel',None)
             context.user_data['receipt_upload']=row['booking_id']
-            await ui.screen(update,context,admin_ui.tr(lang,
-                f"Отправь один скриншот для брони #{row['booking_id']} как фото или PNG/JPEG/WebP-файл до 10 МБ. /cancel — прервать. Загрузка не подтверждает оплату.",
-                f"예약 #{row['booking_id']}의 사진 또는 PNG/JPEG/WebP 파일을 보내세요 (10MB 이하). /cancel 로 중단. 업로드는 입금 확인이 아닙니다.", f"Send one payment image for booking #{row['booking_id']} as a photo or PNG/JPEG/WebP file up to 10 MB. /cancel to stop. Uploading does not confirm payment."))
+            await ui.screen(update,context,upload_prompt(row,lang))
         elif action=='view':
             row,lang=await admin_ui.call(update,context,lambda c,a,l:(get_booking(c,a,int(parts[2])),l))
             if not row.get('payment_receipt'):

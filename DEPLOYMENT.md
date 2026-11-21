@@ -575,3 +575,24 @@ docker compose --profile bot up -d --force-recreate bot
 Публичный адрес и парковка настраиваются в `information.address_parking.ru/ko/en` в config.yaml; если раздел отсутствует, используются новые тексты по умолчанию с 4 бесплатными часами парковки. Суммы в /price берутся из существующего pricing. Если в инструкциях `visit` остались прежние условия парковки, приведите их к тем же 4 бесплатным часам.
 
 Проверьте /help (инструкция), Language (выбор языка), /address, /price, восстановление меню после отправки контакта и наличие панели администратора только у owner/admin.
+
+## Удаление неактуальных броней клиентом (015)
+
+После получения нового кода и при уже применённых миграциях до `014` выполните только `015`. Если база старее, сначала примените недостающие миграции по порядку. Не запускайте обновлённый бот до завершения миграции.
+
+```bash
+cd /opt/ace-place
+git pull --ff-only origin main
+docker compose --profile bot stop bot
+docker compose --profile bot build bot
+docker compose --profile bot run --rm --no-deps bot python -m app.migrate --apply --migration 015_client_booking_archive
+```
+
+Продолжайте только после сообщения `Migration committed: 015_client_booking_archive.`:
+
+```bash
+docker compose --profile bot up -d --force-recreate bot
+docker compose logs --tail 50 -f bot
+```
+
+Удаление добавляет отметку `client_deleted_at`, не меняя бизнес-статус и версию брони. История, платежи, возвраты, занятость уборки и события Google Calendar сохраняются. Новая пустая база требует всех миграций `001`–`015` по порядку. Для локального запуска: ` .\.venv\Scripts\python.exe -m app.migrate --apply --migration 015_client_booking_archive`, затем обычный перезапуск бота.

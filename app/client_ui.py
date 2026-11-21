@@ -20,6 +20,7 @@ from app.users import register_client,admin_role
 from app.date_picker import month_keyboard,parse_month
 from app import booking_details
 from app import navigation
+from app.booking_archive import archive_bookings,can_archive,ELIGIBLE_SQL
 
 
 def menu(lang):
@@ -45,21 +46,24 @@ async def show_mine(update,context,page=0):
     if not 0<=page<=100000:
         raise BookingError('Invalid page')
     def fetch(c,a,u):
-        rows=c.execute("SELECT booking_id,starts_at FROM bookings WHERE user_id=%s AND status <> 'cancelled' ORDER BY starts_at DESC LIMIT 9 OFFSET %s",(u.user_id,page*8)).fetchall()
-        return rows,u.language
-    rows,lang=await call(update,context,fetch)
+        rows=c.execute("SELECT booking_id,starts_at FROM bookings WHERE user_id=%s AND client_deleted_at IS NULL AND status <> 'cancelled' ORDER BY starts_at DESC,booking_id DESC LIMIT 9 OFFSET %s",(u.user_id,page*8)).fetchall()
+        removable=c.execute('SELECT EXISTS(SELECT 1 FROM bookings WHERE user_id=%s AND client_deleted_at IS NULL AND '+ELIGIBLE_SQL+')',(u.user_id,)).fetchone()[0]
+        return rows,u.language,removable
+    rows,lang,removable=await call(update,context,fetch)
     buttons=[[Button(f'#{bid} · {fmt(start)}',callback_data=f'cli:view:{bid}')] for bid,start in rows[:8]]
     if page:
         buttons.append([Button('←',callback_data=f'cli:mine:{page-1}')])
     if len(rows)>8:
         buttons.append([Button('→',callback_data=f'cli:mine:{page+1}')])
+    if removable:
+        buttons.append([Button(tr(lang,'Удалить все неактуальные','지난 예약 모두 삭제','Remove all inactive bookings'),callback_data='cli:archive:all')])
     await ui.screen(update,context,tr(lang,'Мои брони','내 예약','My bookings') if rows else tr(lang,'Броней пока нет.','아직 예약이 없습니다.','No bookings yet.'),reply_markup=Markup(buttons) if buttons else None)
 
 
 def own_booking(c,actor,bid):
     row=get_booking(c,actor,bid)
     own=c.execute('SELECT user_id FROM clients WHERE telegram_user_id=%s',(actor,)).fetchone()[0]
-    if row['user_id']!=own:
+    if row['user_id']!=own or row.get('client_deleted_at'):
         raise BookingError('Booking access denied')
     return row
 
@@ -100,6 +104,8 @@ def controls(row,lang):
         buttons.append([Button(tr(lang,'Отменить бронь','예약 취소', 'Cancel booking'),callback_data=f"cli:cancel:{row['booking_id']}:{row['version']}")])
     elif row['status'] in ('pending','hold') and row['expires_at']>datetime.now(SEOUL):
         buttons.append([Button(tr(lang,'Отозвать заявку','신청 철회', 'Withdraw request'),callback_data=f"cli:withdraw:{row['booking_id']}:{row['version']}")])
+    if can_archive(row,datetime.now(SEOUL)):
+        buttons.append([Button(tr(lang,'Удалить из моих броней','내 예약에서 삭제','Remove from my bookings'),callback_data=f"cli:archive:{row['booking_id']}")])
     return Markup(buttons)
 
 
@@ -184,6 +190,8 @@ async def callback(update,context):
         lang=await call(update,context,lambda c,a,u:u.language)
         parts=query.data.split(':')
         command=parts[1]
+        if command in ('new','mine','view','cancel','cancel_yes','withdraw','withdraw_yes','archive','archive_yes'):
+            context.user_data.pop('receipt_upload',None)
         if command in ('new','mine','view'):
             context.user_data.pop('client_cancel',None)
         if command=='new':
@@ -206,6 +214,25 @@ async def callback(update,context):
             await accept_date(update,context,parts[2],lang)
         elif command=='mine':
             await show_mine(update,context,int(parts[2]))
+        elif command in ('archive','archive_yes'):
+            target=parts[2]
+            bid=None if target=='all' else int(target)
+            if command=='archive':
+                if bid is not None:
+                    row=await call(update,context,lambda c,a,u:own_booking(c,a,bid))
+                    if not can_archive(row,datetime.now(SEOUL)):
+                        raise BookingError('Only inactive bookings can be removed')
+                text=tr(lang,
+                    'Удалить все завершённые, просроченные и отменённые брони из «Моих броней»?' if bid is None else f'Удалить бронь #{bid} из «Моих броней»?',
+                    '완료·만료·취소된 예약을 모두 내 예약에서 삭제할까요?' if bid is None else f'예약 #{bid}을 내 예약에서 삭제할까요?',
+                    'Remove all completed, expired and cancelled bookings from My bookings?' if bid is None else f'Remove booking #{bid} from My bookings?')
+                text+='\n'+tr(lang,'История и платежи сохранятся у администратора. Это не отмена брони и не возврат денег.','관리자에게 기록과 결제 정보는 유지됩니다. 예약 취소나 환불이 아닙니다.','The administrator keeps the records and payments. This does not cancel a booking or issue a refund.')
+                await ui.screen(update,context,text,reply_markup=Markup([
+                    [Button(tr(lang,'Да, удалить','삭제 확인','Yes, remove'),callback_data=f'cli:archive_yes:{target}')],
+                    [Button(tr(lang,'Назад','뒤로','Back'),callback_data='cli:mine:0')]]))
+            else:
+                await call(update,context,lambda c,a,u:archive_bookings(c,a,bid))
+                await show_mine(update,context)
         elif command in ('cancel','cancel_yes'):
             if command=='cancel':
                 bid=int(parts[2])
@@ -293,6 +320,9 @@ async def callback(update,context):
                     raise BookingError('Draft expired')
                 bank,account,holder=data['payment']
                 text=card(row,lang)+'\n\n'+tr(lang,'Предоплата: ','선입금: ', 'Deposit: ')+f"{data['deposit']} KRW\n{bank}\n{account}\n{holder}"
+                from app.payment_ui import expect_receipt_after_booking,upload_prompt
+                if expect_receipt_after_booking(context,row):
+                    text+='\n\n'+upload_prompt(row,lang)
                 await ui.result(update,context,text,reply_markup=controls(row,lang),key=f"client:create:{row['booking_id']}")
     except (BookingError,ValueError,IndexError) as error:
         await show_error(update,error,context)
