@@ -63,7 +63,7 @@ visit:
     entry_instructions: |-
       На этаже B1 после выхода из лифта поверните направо.
 
-      Парковка находится в этом же здании на этажах B2 и B3. Вместимость — около 1000 автомобилей.
+      Парковка находится в этом же здании на этажах B2 и B3.
       Зарегистрируйте автомобиль в управляющем офисе (관리사무실) до 17:00, пока он работает.
       После регистрации первые 4 часа парковки бесплатны, далее — 600 ₩ за каждые 30 минут.
   ko:
@@ -72,7 +72,7 @@ visit:
     entry_instructions: |-
       지하 1층(B1)에서 엘리베이터를 내린 후 오른쪽으로 오시면 됩니다.
 
-      주차장은 같은 건물 지하 2층(B2)과 지하 3층(B3)에 있으며, 약 1,000대 주차가 가능합니다.
+      주차장은 같은 건물 지하 2층(B2)과 지하 3층(B3)에 있습니다.
       관리사무실 운영 시간인 오후 5시(17:00)까지 차량을 등록해 주세요.
       차량 등록 시 최초 4시간 무료이며, 이후 30분당 600원이 부과됩니다.
   en:
@@ -81,7 +81,7 @@ visit:
     entry_instructions: |-
       On level B1, turn right when leaving the lift.
 
-      Parking is in the same building on basement levels B2 and B3, with approximately 1,000 spaces.
+      Parking is in the same building on basement levels B2 and B3.
       Register your vehicle at the management office (관리사무실) before 17:00, while it is open.
       After registration, the first 4 hours are free; each additional 30 minutes costs 600 ₩.
 booking:
