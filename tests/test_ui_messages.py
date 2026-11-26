@@ -62,8 +62,22 @@ class UIMessagesTests(unittest.IsolatedAsyncioTestCase):
         await ui.result(self.update(mid=6),self.context,'Confirmed',key='confirm:42',
             retire_refs=([10,5],[10,6],[10,7],[10,5],[99,8]))
         deleted=[call.kwargs['message_id'] for call in self.bot.delete_message.call_args_list]
-        self.assertEqual(deleted,[5,6])
-        self.assertEqual(self.context.user_data['_ui_results']['confirm:42'],[10,7])
+        self.assertEqual(deleted,[7,5,6])
+        self.assertEqual(self.context.user_data['_ui_results']['confirm:42'],[10,100])
+
+    async def test_notification_action_replies_at_bottom_not_in_unrelated_old_menu(self):
+        self.context.user_data['_ui_screen']=[10,5]
+        update=self.update(mid=25)
+        await ui.screen(update,self.context,'Confirm booking?',reply_markup=None)
+        self.bot.edit_message_text.assert_not_awaited()
+        update.effective_message.reply_text.assert_awaited_once()
+        self.bot.delete_message.assert_awaited_once_with(chat_id=10,message_id=5)
+        self.assertEqual(self.context.user_data['_ui_screen'],[10,100])
+
+    async def test_delayed_callback_acknowledgement_does_not_prevent_handling(self):
+        query=SimpleNamespace(answer=AsyncMock(side_effect=BadRequest('Query is too old')))
+        await ui.answer_callback(query)
+        query.answer.assert_awaited_once()
 
     async def test_failed_result_delivery_preserves_action_cards_for_retry(self):
         self.bot.edit_message_text.side_effect=TimedOut()

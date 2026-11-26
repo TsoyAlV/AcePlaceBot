@@ -18,6 +18,7 @@ from app.google_calendar import CalendarAdapter,RecreateEvent,make_service
 from app.rental_rules import SEOUL
 from app import books_plans
 from app import booking_details
+from app.calendar_errors import error_reason
 
 logger=logging.getLogger(__name__)
 
@@ -121,8 +122,7 @@ def finish(settings,job,error=None):
             state.update(status='pending',retry_at=now.isoformat(),attempts=0)
         elif error:
             # Keep only class/status, never credentials, request URLs or event contents.
-            http_status=getattr(getattr(error,'resp',None),'status',None)
-            reason=type(error).__name__+(f':{http_status}' if http_status else '')
+            reason=error_reason(error)
             delay=min(3600,30*2**min(state.get('attempts',1),7))
             state.update(status='pending',last_error=reason,retry_at=(now+timedelta(seconds=delay)).isoformat())
         else:
@@ -169,7 +169,7 @@ def sync_once(settings,adapter_factory=None,limit=20):
             finish(settings,job)
         except Exception as error:
             finish(settings,job,error)
-            logger.warning('Calendar sync failed (%s)',type(error).__name__)
+            logger.warning('Calendar sync failed (%s)',error_reason(error))
         processed+=1
     return processed
 

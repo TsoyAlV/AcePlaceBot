@@ -6,7 +6,7 @@ from datetime import datetime,timezone
 from app import client_ui,admin_ui
 from app import ui_messages as ui
 from app.bookings import BookingError,get_booking
-from app.payments import submit_receipt,review_receipt
+from app.payments import submit_receipt,review_receipt,can_upload_receipt,ReceiptUnavailable
 
 
 def upload_prompt(row,lang):
@@ -18,10 +18,7 @@ def upload_prompt(row,lang):
 
 def expect_receipt_after_booking(context,row):
     """Only arm the exact booking just created/replayed, never guess another one."""
-    now=datetime.now(timezone.utc)
-    receipt=row.get('payment_receipt') or {}
-    active=(row['status']=='pending' and row.get('expires_at') and row['expires_at']>now) or (row['status']=='confirmed' and row['ends_at']>now)
-    ready=(row['type']=='booking' and active and row['deposit_paid_amount']==0 and receipt.get('review_status') in (None,'rejected'))
+    ready=can_upload_receipt(row,datetime.now(timezone.utc))
     if ready:
         context.user_data['receipt_upload']=row['booking_id']
     elif context.user_data.get('receipt_upload')==row['booking_id']:
@@ -67,14 +64,14 @@ async def callback(update,context):
     query=update.callback_query
     if not query or not query.data or not query.data.startswith('pay:'):
         return
-    await query.answer()
+    await ui.answer_callback(query)
     try:
         parts=query.data.split(':')
         action=parts[1]
         if action=='upload':
             row,lang=await client_ui.call(update,context,lambda c,a,u:(client_ui.own_booking(c,a,int(parts[2])),u.language))
-            if row['status'] not in ('pending','confirmed','expired','cancelled'):
-                raise BookingError('Receipt is not allowed')
+            if not can_upload_receipt(row,datetime.now(timezone.utc)):
+                raise ReceiptUnavailable('Receipt not allowed for this booking')
             context.user_data.pop('admin_draft',None)
             context.user_data.pop('client_draft',None)
             context.user_data.pop('staff_draft',None)
@@ -138,7 +135,14 @@ async def media_input(update,context):
 
 async def error_message(update,error,context=None):
     text=str(error)
-    if text=='Send an image':
+    if isinstance(error,ReceiptUnavailable) or text=='Booking removed from your list':
+        if context is not None:
+            context.user_data.pop('receipt_upload',None)
+        message=admin_ui.tr((getattr(context,'user_data',None) or {}).get('_language','ru'),
+            'Для этой брони отправка подтверждения оплаты недоступна. Открой «Мои брони», чтобы посмотреть актуальный статус. Если перевод уже сделан, свяжись с администратором.',
+            '이 예약에는 결제 증빙을 보낼 수 없습니다. «내 예약»에서 현재 상태를 확인해 주세요. 이미 송금했다면 관리자에게 문의해 주세요.',
+            'Payment evidence cannot be submitted for this booking. Open My bookings to check its current status. If you have already transferred money, contact the administrator.')
+    elif text=='Send an image':
         message='Видео и кружочки не подходят. Отправь фото или PNG/JPEG/WebP-файл до 10 МБ. Бронь выбрана, повторно нажимать кнопку не нужно. / 동영상과 동영상 메시지는 지원하지 않습니다. 10MB 이하 사진 또는 PNG/JPEG/WebP 파일을 보내세요. 예약을 다시 선택할 필요는 없습니다.'
     elif text=='Image too large':
         message='Изображение больше 10 МБ. Отправь уменьшенное фото или файл до 10 МБ. / 이미지가 10MB를 초과합니다. 크기를 줄여 다시 보내세요.'

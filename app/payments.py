@@ -10,13 +10,30 @@ from app.business_config import load_business_config
 from app.booking_events import enqueue_event
 
 
+class ReceiptUnavailable(BookingError):
+    """The booking no longer accepts client payment evidence."""
+
+
+def receipt_booking_active(row,now):
+    if row['type']!='booking' or row.get('client_deleted_at') or row['ends_at']<=now:
+        return False
+    return row['status']=='confirmed' or (row['status']=='pending' and
+        row.get('expires_at') is not None and row['expires_at']>now)
+
+
+def can_upload_receipt(row,now):
+    return (receipt_booking_active(row,now) and row['deposit_paid_amount']==0 and
+        (row.get('payment_receipt') or {}).get('review_status') in (None,'rejected'))
+
+
 def submit_receipt(connection,actor,booking_id,*,file_id,file_unique_id,media_type):
     _lock(connection)
     row=_get(connection,booking_id,lock=True)
     if row['user_id']!=_user(connection,actor):
         raise AccessDenied('Booking access denied')
-    if row['type']!='booking' or row['status'] not in ('pending','confirmed','expired','cancelled'):
-        raise BookingError('Receipt not allowed for this booking')
+    now=_now(connection)
+    if not receipt_booking_active(row,now):
+        raise ReceiptUnavailable('Receipt not allowed for this booking')
     if media_type not in ('photo','document') or not file_id or not file_unique_id:
         raise BookingError('An image is required')
     previous=row.get('payment_receipt')
@@ -26,10 +43,8 @@ def submit_receipt(connection,actor,booking_id,*,file_id,file_unique_id,media_ty
         raise BookingError('Deposit is already recorded')
     if previous and previous['review_status']!='rejected':
         raise BookingError('Receipt is already awaiting review or accepted')
-    now=_now(connection)
-    late=row['status'] in ('expired','cancelled') or (row['status']=='pending' and row['expires_at']<=now)
     receipt=dict(file_id=file_id,file_unique_id=file_unique_id,media_type=media_type,
-        submitted_at=now.isoformat(),review_status='pending',late=late,
+        submitted_at=now.isoformat(),review_status='pending',late=False,
         expected_amount=load_business_config().payment.deposit_amount,unit='KRW')
     if previous:
         receipt['previous_rejected']=dict(file_unique_id=previous['file_unique_id'],reviewed_at=previous.get('reviewed_at'))

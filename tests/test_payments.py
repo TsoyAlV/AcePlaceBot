@@ -84,18 +84,33 @@ class PaymentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(bookings.BookingError):
             self.submit(row)
 
-    async def test_late_evidence_is_kept_but_does_not_restore_booking(self):
+    async def test_expired_booking_rejects_new_evidence_without_restoring_booking(self):
         row=self.create()
         with self.connection(self.settings) as c:
             c.execute("UPDATE bookings SET expires_at=clock_timestamp()-interval '1 second' WHERE booking_id=%s",(row['booking_id'],))
             bookings.expire_bookings(c)
-        row=self.submit(row)
-        self.assertTrue(row['payment_receipt']['late'])
-        with self.assertRaises(bookings.BookingError):
-            self.review(row)
+        with self.assertRaises(payments.ReceiptUnavailable):
+            self.submit(row)
         current=bookings.get_booking(self.c,102,row['booking_id'])
         self.assertEqual(current['status'],'expired')
         self.assertEqual(current['deposit_paid_amount'],0)
+        self.assertIsNone(current['payment_receipt'])
+
+    async def test_cancellation_after_upload_started_rejects_photo(self):
+        row=self.create()
+        context=SimpleNamespace(user_data={},bot_data={'settings':self.settings})
+        with patch('app.client_ui.connect_database',side_effect=self.connection):
+            await payment_ui.callback(self.update(data=f"pay:upload:{row['booking_id']}"),context)
+            self.assertEqual(context.user_data['receipt_upload'],row['booking_id'])
+            with self.connection(self.settings) as c:
+                bookings.change_booking(c,101,row['booking_id'],action='cancel',expected_version=row['version'])
+            image=SimpleNamespace(file_id='late',file_unique_id='late-image',file_size=100)
+            await payment_ui.media_input(self.update(photo=image),context)
+        current=bookings.get_booking(self.c,102,row['booking_id'])
+        self.assertEqual(current['status'],'cancelled')
+        self.assertIsNone(current['payment_receipt'])
+        self.assertEqual(current['deposit_paid_amount'],0)
+        self.assertNotIn('receipt_upload',context.user_data)
 
     async def test_pending_evidence_is_delivered_even_after_expiry(self):
         row=self.submit(self.create())

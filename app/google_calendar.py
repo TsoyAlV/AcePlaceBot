@@ -11,6 +11,10 @@ from app.business_config import load_business_config
 SCOPES=['https://www.googleapis.com/auth/calendar.events.owned']
 
 
+class CalendarAuthorizationError(ValueError):
+    """Missing local authorization requires an explicit Google sign-in."""
+
+
 class RecreateEvent(Exception):
     """Google retains a tombstone for an event; allocate another ID durably."""
 
@@ -62,7 +66,7 @@ def save_token(path,credentials):
     temporary.replace(path)
 
 
-def make_service(settings):
+def make_service(settings,*,force_refresh=False):
     import httplib2
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -70,13 +74,13 @@ def make_service(settings):
     from googleapiclient.discovery import build
     path=token_path(settings)
     if not path.is_file():
-        raise ValueError(f'Google authorization token not found: {path}\nRun: python -m app.google_calendar auth\nThe downloaded OAuth client JSON is not an authorization token.')
+        raise CalendarAuthorizationError(f'Google authorization token not found: {path}\nRun: python -m app.google_calendar auth\nThe downloaded OAuth client JSON is not an authorization token.')
     credentials=Credentials.from_authorized_user_file(str(path),SCOPES)
     if not credentials.has_scopes(SCOPES):
-        raise ValueError('Google authorization needs calendar.events.owned')
-    if not credentials.valid:
+        raise CalendarAuthorizationError('Google authorization needs calendar.events.owned. Run: python -m app.google_calendar auth')
+    if force_refresh or not credentials.valid:
         if not credentials.refresh_token:
-            raise ValueError('Authorize Google again')
+            raise CalendarAuthorizationError('Authorize Google again: python -m app.google_calendar auth')
         request=Request()
         credentials.refresh(lambda *args,**kwargs:request(*args,**{**kwargs,'timeout':20}))
         save_token(path,credentials)
@@ -144,7 +148,8 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     auth=sub.add_parser('auth')
     auth.add_argument('--client-file')
-    sub.add_parser('check')
+    check=sub.add_parser('check')
+    check.add_argument('--refresh',action='store_true',help='Also validate refresh-token access, even if the current access token is valid')
     args=parser.parse_args()
     try:
         settings=load_settings()
@@ -153,7 +158,7 @@ def main():
         else:
             if not settings.google_calendar_id:
                 raise ValueError('Set GOOGLE_CALENDAR_ID in .env')
-            service=make_service(settings)
+            service=make_service(settings,force_refresh=args.refresh)
             service.events().list(calendarId=settings.google_calendar_id,maxResults=1).execute(num_retries=0)
             colors=service.colors().get().execute(num_retries=0)
             print('Calendar readable. Event color IDs: '+', '.join(sorted(colors.get('event',{}))))
@@ -162,7 +167,10 @@ def main():
         print(str(error))
         return 1
     except Exception as error:
-        print(f'Google setup failed ({type(error).__name__}). Check credentials, Calendar ID and account permissions.')
+        from app.calendar_errors import error_reason,error_hint
+        reason=error_reason(error)
+        print(f'Google setup failed ({reason}).')
+        print(error_hint(reason,'en') or 'Check credentials, Calendar ID, account permissions and connectivity.')
         return 1
 
 

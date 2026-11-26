@@ -85,20 +85,24 @@ class AdminUITests(unittest.IsolatedAsyncioTestCase):
             context.user_data['_ui_screen']=[101,50]
             update=self.update(text='Новая заявка',data=f"adm:ask:confirm:{row['booking_id']}:{row['version']}")
             update.effective_message.message_id=60
+            update.effective_message.reply_text.return_value=SimpleNamespace(message_id=65)
             await admin_ui.callback(update,context)
             data=context.user_data['admin_draft']
             # The admin navigates elsewhere before pressing the existing confirmation.
             context.user_data['_ui_screen']=[101,70]
             apply=self.update(text='Подтвердить бронь?',data='adm:apply:'+data['token'])
-            apply.effective_message.message_id=50
+            apply.effective_message.message_id=65
+            apply.effective_message.reply_text.return_value=SimpleNamespace(message_id=80)
             await admin_ui.callback(apply,context)
             self.assertEqual(data['result']['status'],'confirmed')
             deleted=[call.kwargs['message_id'] for call in context.bot.delete_message.call_args_list]
             self.assertIn(60,deleted)
             self.assertIn(50,deleted)
-            self.assertNotIn(70,deleted)
-            self.assertEqual(context.bot.edit_message_text.call_args.kwargs['message_id'],70)
-            self.assertIn('Подтверждено',context.bot.edit_message_text.call_args.kwargs['text'])
+            self.assertIn(65,deleted)
+            self.assertIn(70,deleted)
+            self.assertNotIn(80,deleted)
+            context.bot.edit_message_text.assert_not_awaited()
+            self.assertIn('Подтверждено',apply.effective_message.reply_text.call_args.args[0])
             await admin_ui.callback(apply,context)
             self.assertEqual(self.c.execute('SELECT status FROM bookings WHERE booking_id=%s',(row['booking_id'],)).fetchone()[0],'confirmed')
 

@@ -167,9 +167,11 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             return update
         with patch.object(self,'update',side_effect=tracked_update),patch('app.client_ui.connect_database',side_effect=self.connection):
             draft=await self.review(context)
-            summary_ref=context.user_data['_ui_screen'][:]
-            await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)
-            summary=context.bot.edit_message_text.call_args.kwargs['text']
+            review_ref=context.user_data['_ui_screen'][:]
+            send=self.update(data='cli:send:'+draft['token'])
+            await client_ui.callback(send,context)
+            summary=send.effective_message.reply_text.call_args.args[0]
+            summary_ref=context.user_data['_ui_results'][f"client:create:{draft['result_id']}"]
             self.assertIn(str(draft['result_id']),summary)
             self.assertIn(draft['payment'][1],summary)
             self.assertNotIn('_ui_screen',context.user_data)
@@ -178,6 +180,7 @@ class ClientUITests(unittest.IsolatedAsyncioTestCase):
             await client_ui.callback(self.update(data='cli:send:'+draft['token']),context)
             self.assertEqual(context.bot.edit_message_text.await_count,edits)
             self.assertNotIn(summary_ref[1],[call.kwargs['message_id'] for call in context.bot.delete_message.call_args_list])
+            self.assertIn(review_ref[1],[call.kwargs['message_id'] for call in context.bot.delete_message.call_args_list])
             self.assertEqual(self.c.execute('SELECT count(*) FROM bookings').fetchone()[0],1)
 
     async def test_competing_booking_wins_before_send(self):

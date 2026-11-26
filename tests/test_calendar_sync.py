@@ -9,6 +9,7 @@ from uuid import uuid4
 import test_bookings as fixtures
 from app import bookings,calendar_sync
 from app.google_calendar import RecreateEvent
+from google.auth.exceptions import RefreshError
 from app.database import connect_database
 
 
@@ -170,6 +171,21 @@ class CalendarSyncTests(unittest.TestCase):
         self.sync()
         self.assertEqual({key[1] for key in self.remote.events},set(ids))
         self.assertEqual(self.fresh(row)['calendar_sync']['status'],'synced')
+
+    def test_auth_failure_keeps_ids_and_recovers_after_reauthorization(self):
+        row=self.change(self.create(),'confirm')
+        with patch('app.calendar_sync.connect_database',side_effect=self.connection):
+            def unavailable():
+                raise RefreshError('private response',{'error':'invalid_grant','error_description':'secret'})
+            calendar_sync.sync_once(self.settings,adapter_factory=unavailable)
+        state=self.fresh(row)['calendar_sync']
+        self.assertEqual(state['last_error'],'RefreshError:invalid_grant')
+        self.assertEqual(self.fresh(row)['status'],'confirmed')
+        ids={state['booking_event_id'],state['cleaning_event_id']}
+        self.due(row)
+        self.sync()
+        self.assertEqual(self.fresh(row)['calendar_sync']['status'],'synced')
+        self.assertEqual({key[1] for key in self.remote.events},ids)
 
     def test_change_during_sync_is_reconciled_to_latest_version(self):
         row=self.change(self.create(),'confirm')
