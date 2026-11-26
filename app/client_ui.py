@@ -21,6 +21,7 @@ from app.date_picker import month_keyboard,parse_month
 from app import booking_details
 from app import navigation
 from app.booking_archive import archive_bookings,can_archive,ELIGIBLE_SQL
+from app.payments import can_upload_receipt
 
 
 def menu(lang):
@@ -63,8 +64,10 @@ async def show_mine(update,context,page=0):
 def own_booking(c,actor,bid):
     row=get_booking(c,actor,bid)
     own=c.execute('SELECT user_id FROM clients WHERE telegram_user_id=%s',(actor,)).fetchone()[0]
-    if row['user_id']!=own or row.get('client_deleted_at'):
+    if row['user_id']!=own:
         raise BookingError('Booking access denied')
+    if row.get('client_deleted_at'):
+        raise BookingError('Booking removed from your list')
     return row
 
 
@@ -96,8 +99,7 @@ def card(row,lang):
 
 def controls(row,lang):
     buttons=[[Button(tr(lang,'Обновить статус','상태 새로고침', 'Refresh status'),callback_data=f"cli:view:{row['booking_id']}")]]
-    receipt=row.get('payment_receipt')
-    if row['status'] in ('pending','confirmed','expired','cancelled') and row['deposit_paid_amount']==0 and (not receipt or receipt['review_status']=='rejected'):
+    if can_upload_receipt(row,datetime.now(SEOUL)):
         buttons.append([Button(tr(lang,'Отправить подтверждение оплаты','결제 증빙 보내기', 'Send payment evidence'),callback_data=f"pay:upload:{row['booking_id']}")])
     paid=row['deposit_paid_amount']+row['balance_paid_amount']
     if row['type']=='booking' and row['starts_at']>datetime.now(SEOUL) and (row['status']=='confirmed' or (row['status'] in ('hold','pending') and paid>0 and row['expires_at']>datetime.now(SEOUL))):
@@ -185,7 +187,7 @@ async def callback(update,context):
     query=update.callback_query
     if not query or not query.data or not query.data.startswith('cli:'):
         return
-    await query.answer()
+    await ui.answer_callback(query)
     try:
         lang=await call(update,context,lambda c,a,u:u.language)
         parts=query.data.split(':')
@@ -406,8 +408,39 @@ async def contact_input(update,context):
 
 
 async def show_error(update,error,context=None):
+    lang=(getattr(context,'user_data',None) or {}).get('_language','ru')
+    reason=str(error)
     if isinstance(error,booking_details.DetailsError):
         text=str(error)
+    elif reason=='Invalid duration' or reason.startswith('Minimum rental duration:'):
+        minimum=load_business_config().booking.minimum_hours
+        text=tr(lang,f'Минимальная аренда — {minimum} ч. Введите целое число от {minimum} до 720 без «ч», например: {minimum}.',
+            f'최소 이용 시간은 {minimum}시간입니다. {minimum}~720 사이의 정수를 입력하세요. 예: {minimum}.',
+            f'The minimum rental is {minimum} hours. Enter a whole number from {minimum} to 720 without “h”, for example: {minimum}.')
+    elif reason=='Booking removed from your list':
+        text=tr(lang,'Эта бронь уже удалена из «Моих броней». Откройте список кнопкой «Мои брони».',
+            '이 예약은 이미 내 예약에서 삭제되었습니다. «내 예약» 버튼으로 목록을 여세요.',
+            'This booking was already removed from My bookings. Open the list using “My bookings”.')
+    elif reason=='Draft expired':
+        text=tr(lang,'Эта кнопка относится к предыдущему шагу или черновику. Продолжите по последнему сообщению бота либо нажмите «Забронировать», чтобы начать заново.',
+            '이 버튼은 이전 단계 또는 이전 신청의 버튼입니다. 봇의 최신 메시지에서 계속하거나 «예약하기»로 다시 시작하세요.',
+            'This button belongs to an earlier step or draft. Continue from the bot’s latest message, or choose “Book now” to start again.')
+    elif reason=='Booking access denied':
+        text=tr(lang,'Эта бронь недоступна. Откройте свои записи кнопкой «Мои брони».',
+            '이 예약에 접근할 수 없습니다. «내 예약»에서 본인의 예약을 확인하세요.',
+            'This booking is not accessible. Open your own entries using “My bookings”.')
+    elif reason=='Only inactive bookings can be removed':
+        text=tr(lang,'Действующую бронь удалить из списка нельзя. Сначала используйте «Отменить бронь» или «Отозвать заявку».',
+            '진행 중인 예약은 삭제할 수 없습니다. 먼저 예약 취소 또는 신청 철회를 이용하세요.',
+            'An active booking cannot be removed. Use “Cancel booking” or “Withdraw request” first.')
+    elif reason=='Past date':
+        text=tr(lang,'Эта дата или время уже прошли по времени Сеула. Выберите будущую дату в календаре.',
+            '서울 시간 기준으로 이미 지난 날짜 또는 시간입니다. 달력에서 미래 날짜를 선택하세요.',
+            'This date or time has already passed in Seoul. Choose a future date in the calendar.')
+    elif isinstance(error,ValueError):
+        step=((getattr(context,'user_data',None) or {}).get('client_draft') or {}).get('step')
+        text=(tr(lang,'Введите длительность целым числом без «ч», например: 5.','이용 시간을 정수로 입력하세요. 예: 5.','Enter the duration as a whole number without “h”, for example: 5.') if step=='hours' else
+              tr(lang,'Введите существующую дату в формате YYYY-MM-DD, например: 2027-01-15.','올바른 날짜를 YYYY-MM-DD 형식으로 입력하세요. 예: 2027-01-15.','Enter a valid date in YYYY-MM-DD format, for example: 2027-01-15.'))
     elif isinstance(error,SlotUnavailable):
         text='Это время уже заняли. Начни заново: /book. / 이미 예약된 시간입니다. /book 으로 다시 시작하세요.'
     elif isinstance(error,StaleBooking):

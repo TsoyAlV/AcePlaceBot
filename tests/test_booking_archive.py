@@ -67,7 +67,7 @@ class ArchiveDatabaseTests(unittest.TestCase):
         before.pop('client_deleted_at')
         self.assertEqual(after,before)
         self.assertEqual(archive_bookings(self.c,102,row['booking_id']),0)
-        self.assertFalse(is_available(self.c,102,row['ends_at'],row['cleaning_ends_at']))
+        self.assertFalse(is_available(self.c,102,row['ends_at'],row['ends_at']+timedelta(hours=5)))
         self.assertEqual(list_bookings(self.c,102),[])
 
     def test_bulk_only_own_inactive_and_expiry_before_worker(self):

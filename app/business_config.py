@@ -224,7 +224,7 @@ class InformationConfig(Model):
 
 
 class WelcomeConfig(Model):
-    website_url: HttpUrl | None = HttpUrl('https://151.243.177.216/')
+    website_url: HttpUrl | None = HttpUrl('https://aceplace.kr/')
     image_path: str | None = 'assets/telegram/aceplace-start-cover-v1.png'
 
     @model_validator(mode='after')

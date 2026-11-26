@@ -55,7 +55,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.bot.current_client',new=AsyncMock(return_value=Client(1,102,'en'))):
             await bot.website_command(update,context)
         markup=update.effective_message.reply_text.call_args.kwargs['reply_markup']
-        self.assertEqual(markup.inline_keyboard[0][0].url,'https://151.243.177.216/')
+        self.assertEqual(markup.inline_keyboard[0][0].url,'https://aceplace.kr/')
         self.assertEqual(markup.inline_keyboard[0][0].text,'Open website')
 
     async def test_contact_keyboard_is_replaced_by_navigation_and_inline_screens_keep_it(self):

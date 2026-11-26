@@ -6,6 +6,14 @@ from telegram import InlineKeyboardMarkup,ReplyKeyboardMarkup,ReplyKeyboardRemov
 FLOW_KEYS=('admin_draft','client_draft','client_cancel','receipt_upload','staff_draft')
 
 
+async def answer_callback(query):
+    """A delayed spinner acknowledgement must not prevent authenticated handling."""
+    try:
+        await query.answer()
+    except TelegramError:
+        pass
+
+
 def with_cancel_hint(text,context):
     data=getattr(context,'user_data',None) or {}
     if '/cancel' in text or not any(key in data for key in FLOW_KEYS):
@@ -89,7 +97,10 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None,par
         old=None
     ref=None
     message=None
-    if old and getattr(update,'callback_query',None) and getattr(context,'bot',None) and not remove_keyboard and (reply_markup is None or isinstance(reply_markup,InlineKeyboardMarkup)):
+    source=_ref(update.effective_message,update) if getattr(update,'callback_query',None) else None
+    # A notification can be far below the tracked screen in chat history. Reply at
+    # the bottom instead of silently editing an unrelated earlier menu.
+    if old and source==old and getattr(context,'bot',None) and not remove_keyboard and (reply_markup is None or isinstance(reply_markup,InlineKeyboardMarkup)):
         try:
             message=await context.bot.edit_message_text(chat_id=old[0],message_id=old[1],text=text,reply_markup=reply_markup,**formatting)
             ref=old
@@ -131,6 +142,7 @@ async def screen(update,context,text,*,reply_markup=None,keep=False,key=None,par
 
 
 async def result(update,context,text,*,reply_markup=None,key=None,retire_refs=()):
+    previous=(getattr(context,'user_data',None) or {}).get('_ui_screen')
     message=await screen(update,context,text,reply_markup=reply_markup,keep=True,key=key)
     # Explicitly supplied action cards are superseded only after the result exists.
     # Ordinary notifications, receipts and unrelated navigation are never inferred here.
@@ -139,7 +151,7 @@ async def result(update,context,text,*,reply_markup=None,key=None,retire_refs=()
     if result_ref:
         seen=set()
         for ref in retire_refs:
-            if ref and ref!=result_ref and ref[0]==getattr(update.effective_chat,'id',None) and tuple(ref) not in seen:
+            if ref and ref!=result_ref and ref!=previous and ref[0]==getattr(update.effective_chat,'id',None) and tuple(ref) not in seen:
                 seen.add(tuple(ref))
                 await _remove(context,ref)
     return message

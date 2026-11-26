@@ -9,6 +9,8 @@ from googleapiclient.errors import HttpError
 
 from app.google_calendar import CalendarAdapter,RecreateEvent
 from app.google_calendar import find_client_file,token_path,make_service
+from app.calendar_errors import error_reason,error_hint
+from google.auth.exceptions import RefreshError
 
 
 def http_error(code):
@@ -59,6 +61,44 @@ class CalendarFileTests(unittest.TestCase):
     def test_explicit_missing_client_reports_its_path(self):
         with self.assertRaisesRegex(ValueError,'missing.json'):
             find_client_file('missing.json')
+
+    def test_forced_check_validates_refresh_even_with_valid_access_token(self):
+        (self.folder/'google_token.json').write_text('{}',encoding='utf-8')
+        credentials=MagicMock(valid=True,refresh_token='fake')
+        credentials.refresh.side_effect=RefreshError('private response',{'error':'invalid_grant'})
+        with patch('google.oauth2.credentials.Credentials.from_authorized_user_file',return_value=credentials), \
+             patch('app.google_calendar.save_token') as save:
+            with self.assertRaises(RefreshError):
+                make_service(SimpleNamespace(google_token_file=''),force_refresh=True)
+        credentials.refresh.assert_called_once()
+        save.assert_not_called()
+
+    def test_refresh_diagnostics_never_expose_response_or_credentials(self):
+        for code,expected in (('invalid_grant','RefreshError:invalid_grant'),
+                              ('invalid_client','RefreshError:invalid_client'),
+                              ('secret-injected-code','RefreshError')):
+            error=RefreshError('private-token-url',{'error':code,'error_description':'secret'})
+            reason=error_reason(error)
+            self.assertEqual(reason,expected)
+            for lang in ('ru','ko','en'):
+                hint=error_hint(reason,lang)
+                self.assertTrue(hint)
+                self.assertNotIn('secret',hint)
+                self.assertNotIn('private-token',hint)
+
+    def test_check_cli_reports_auth_failure_with_safe_reason(self):
+        from app.google_calendar import main
+        from contextlib import redirect_stdout
+        from io import StringIO
+        output=StringIO()
+        with patch('sys.argv',['google_calendar','check','--refresh']), \
+             patch('app.google_calendar.load_settings',return_value=SimpleNamespace(google_calendar_id='calendar')), \
+             patch('app.google_calendar.make_service',side_effect=RefreshError('private-token-url',{'error':'invalid_grant'})), \
+             redirect_stdout(output):
+            self.assertEqual(main(),1)
+        self.assertIn('RefreshError:invalid_grant',output.getvalue())
+        self.assertIn('Authorize',output.getvalue())
+        self.assertNotIn('private-token',output.getvalue())
 
 
 class GoogleAdapterTests(unittest.TestCase):

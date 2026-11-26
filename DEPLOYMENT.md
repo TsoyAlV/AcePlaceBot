@@ -596,3 +596,50 @@ docker compose logs --tail 50 -f bot
 ```
 
 Удаление добавляет отметку `client_deleted_at`, не меняя бизнес-статус и версию брони. История, платежи, возвраты, занятость уборки и события Google Calendar сохраняются. Новая пустая база требует всех миграций `001`–`015` по порядку. Для локального запуска: ` .\.venv\Scripts\python.exe -m app.migrate --apply --migration 015_client_booking_archive`, затем обычный перезапуск бота.
+
+## Восстановление Google Calendar при RefreshError
+
+`RefreshError:invalid_grant` означает, что Google больше не принимает сохранённую авторизацию. Это может быть истечение или отзыв refresh token; ошибка сама по себе не устанавливает точную причину. Не удаляйте брони, `calendar_sync` или события вручную: так потеряются связи с календарём. Бронирование и защита времени уборки в боте продолжают работать; очередь Google сохраняется.
+
+1. После установки обновлённого кода и сборки образа проверьте доступ **на VPS**:
+
+   ```bash
+   cd /opt/ace-place
+   docker compose --profile bot run --rm --no-deps bot python -m app.google_calendar check --refresh
+   ```
+
+   Команда только читает календарь и проверяет обновление авторизации; события не меняет. При ошибке выводятся безопасный код и подсказка, без токенов и полного ответа Google. `RefreshError:temporary` — временный сбой; `invalid_client`/`unauthorized_client` требует проверки OAuth-клиента; при `invalid_grant` нужен новый вход.
+
+2. В Google Cloud выберите проект бота → Google Auth Platform → Audience. Если External-приложение имеет статус **Testing**, refresh token для Calendar обычно истекает через 7 дней. Для постоянной работы переведите приложение в **In production**, выполнив требования, которые покажет Google. Это статус OAuth-приложения Google, а не публикация Telegram-бота. Не считайте один только переход статуса восстановлением уже недействующего токена: после этого авторизуйтесь заново. [Официальное описание срока refresh token](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+3. **На локальном Windows**, в папке проекта, повторите авторизацию Desktop OAuth-клиентом:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m app.google_calendar auth
+   .\.venv\Scripts\python.exe -m app.google_calendar check --refresh
+   ```
+
+   В браузере самостоятельно войдите в аккаунт с правами на нужный календарь и подтвердите доступ. OAuth-клиент JSON и файл выданного токена — разные файлы. Если задан `GOOGLE_TOKEN_FILE`, результат сохраняется туда; иначе в `<calendar.json_dir>/google_token.json`. При нескольких Desktop JSON используйте `auth --client-file "secrets/calendars/имя_клиента.json"`. Не отправляйте JSON в чат и не добавляйте его в Git.
+
+4. После успешной проверки загрузите **новый файл токена** через SFTP MobaXterm в `/opt/ace-place/secrets/calendars/google_token.json`, заменив прежний. Если у вас изменены путь, `GOOGLE_TOKEN_FILE` или bind-mount, используйте свой путь. Затем на VPS:
+
+   ```bash
+   cd /opt/ace-place
+   chown 10001:10001 secrets/calendars/google_token.json
+   chmod 600 secrets/calendars/google_token.json
+   docker compose --profile bot run --rm --no-deps bot python -m app.google_calendar check --refresh
+   ```
+
+   Доступ на запись к каталогу `secrets/calendars` тоже должен оставаться у UID 10001, как при первоначальной настройке: токен сохраняется через временный файл и атомарную замену. Продолжайте только после `Calendar readable...`.
+
+5. Перезапустите бот и повторите синхронизацию сохранённой очереди:
+
+   ```bash
+   docker compose --profile bot restart bot
+   docker compose --profile bot run --rm --no-deps bot python -m app.calendar_sync --reconcile
+   docker compose logs --tail 50 -f bot
+   ```
+
+   Сверка использует существующие ID, обновляет аренду и уборку и удаляет события отменённых броней. За запуск обрабатывается ограниченное число заданий; остальное продолжит бот. Обновите карточки в `/admin` и проверьте `Google Calendar: synced`, затем сами события в календаре. Статус `Processed jobs` в консоли означает обработку заданий, а не гарантированный успех каждого: ошибки видны в карточках и логах.
+
+После восстановления перепроверьте одну тестовую бронь: подтверждение → два события аренды и уборки; перенос → обновление обоих без дублей; отмена → удаление обоих. Также проверьте повторяющуюся серию `books_plans`. Реальные платежи для такой проверки не нужны.

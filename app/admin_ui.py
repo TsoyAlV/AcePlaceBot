@@ -76,6 +76,10 @@ def card(row, lang):
         text+='\nGoogle Calendar: '+sync.get('status','pending')
         if sync.get('last_error'):
             text+=' · '+sync['last_error']
+            from app.calendar_errors import error_hint
+            hint=error_hint(sync['last_error'],lang)
+            if hint:
+                text+='\n'+hint
     if (row.get('request_data') or {}).get('source')=='books_plans':
         text+='\n'+tr(lang,'Источник: books_plans; изменения через config.yaml','출처: books_plans; config.yaml에서 변경', 'Source: books_plans; edit via config.yaml')
     details=cancellation_text(row,lang)
@@ -252,7 +256,7 @@ async def callback(update, context):
     query=update.callback_query
     if not query or not query.data or not query.data.startswith('adm:'):
         return
-    await query.answer()
+    await ui.answer_callback(query)
     try:
         lang=await call(update,context,lambda c,a,l:l)
         context.user_data.pop('staff_draft',None)
@@ -320,7 +324,12 @@ async def callback(update, context):
                 raise BookingError('Invalid action')
             row=await call(update,context,lambda c,a,l:get_booking(c,a,bid))
             if row['version']!=version:
-                raise StaleBooking('Reload booking')
+                context.user_data.pop('admin_draft',None)
+                text=tr(lang,'Запись изменилась. Ниже актуальная карточка; проверьте её и выберите действие повторно.\n\n',
+                    '예약이 변경되었습니다. 아래 최신 정보를 확인한 후 작업을 다시 선택하세요.\n\n',
+                    'This entry has changed. Review the current card below and choose the action again.\n\n')
+                await ui.screen(update,context,text+card(row,lang),reply_markup=controls(row,lang))
+                return
             data=draft(context,action=action,row=row,step='start' if action=='move' else 'review')
             source=ui.action_source(update)
             if source:
